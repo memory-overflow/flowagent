@@ -4,6 +4,16 @@
 
 flowagent 是一个对话驱动的全局工作流编排框架：把自然语言对话规划成一张 DAG 子任务图，并行调度执行，前序节点的输出自动注入后续节点。内置 MCP 工具与 skill 生态，Go 后端 + React 前端。
 
+## 目录
+
+- [Quick Start](#quick-start)
+- [Why flowagent](#why-flowagent)
+- [Features](#features)
+- [两种使用方式](#两种使用方式)
+- [API 概览](#api-概览)
+- [目录结构](#目录结构)
+- [License](#license)
+
 ## Quick Start
 
 使用自带前端快速启动：
@@ -59,28 +69,7 @@ npm run build    # 生产构建到 dist/
 - **MCP 工具协议**：通过 Model Context Protocol 接入外部工具，内置 stdio / SSE / streamable_http 三种传输。
 - **内置 skill 系统**：自有一等 skill（docx / pptx / shell），并打包第三方 skill（pdfkit-py、minimax-xlsx）。
 - **一对话多工作流**：一个 chat 可绑定多条工作流，节点支持增量更新与版本化。
-
-## Architecture
-
-```
-┌──────────────┐   HTTP/SSE    ┌──────────────────┐
-│   React 前端  │ ◄───────────► │   agent-server    │
-│    (Vite)    │               │  (Gin, :8080)     │
-└──────────────┘               └────────┬─────────┘
-                                        │ HTTP 内部回调
-                               ┌────────▼─────────┐
-                               │  agent-scheduler   │
-                               │  (Stage 调度器)    │
-                               └────────┬─────────┘
-                                        │
-                        ┌───────────────┼───────────────┐
-                        ▼               ▼               ▼
-                     MySQL/SQLite     MCP 工具        Skills
-```
-
-- **agent-server**（`cmd/server`）：HTTP API、SSE 流式、对话/模型/工作流/MCP/skill 管理。
-- **agent-scheduler**（`cmd/scheduler`）：独立进程，扫描任务表，驱动 DAG 子任务的规划与执行。
-- **frontend**（`frontend/`）：React 18 + Vite，DAG 渲染基于 `@xyflow/react`。
+- **完整调试路径**：每个任务保留完整执行轨迹——规划思考过程、MCP 工具调用记录（输入/输出/耗时）、任务轮次、上下文用量、失败原因，并内置 pprof 端点（block / mutex profiling）定位性能问题。
 
 ## 两种使用方式
 

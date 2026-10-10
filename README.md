@@ -4,6 +4,16 @@
 
 A conversation-driven workflow orchestration framework — turn natural-language conversations into parallel DAG task graphs, executed with built-in MCP tools, skills, and context engineering. Built with Go + React.
 
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Why flowagent](#why-flowagent)
+- [Features](#features)
+- [Two ways to use](#two-ways-to-use)
+- [API Overview](#api-overview)
+- [Directory Structure](#directory-structure)
+- [License](#license)
+
 ## Quick Start
 
 Run flowagent with its built-in web UI:
@@ -59,28 +69,7 @@ Open the frontend URL to chat and inspect DAG workflows.
 - **MCP tool protocol**: integrate external tools via the Model Context Protocol, with stdio / SSE / streamable_http transports.
 - **Built-in skill system**: first-party skills (docx / pptx / shell) plus bundled third-party skills (pdfkit-py, minimax-xlsx).
 - **Multiple workflows per conversation**: one chat can drive several workflows, with incremental node updates and versioning.
-
-## Architecture
-
-```
-┌──────────────┐   HTTP/SSE    ┌──────────────────┐
-│   React UI   │ ◄───────────► │   agent-server    │
-│    (Vite)    │               │  (Gin, :8080)     │
-└──────────────┘               └────────┬─────────┘
-                                        │ HTTP internal callback
-                               ┌────────▼─────────┐
-                               │  agent-scheduler   │
-                               │  (Stage scheduler) │
-                               └────────┬─────────┘
-                                        │
-                        ┌───────────────┼───────────────┐
-                        ▼               ▼               ▼
-                     MySQL/SQLite     MCP tools      Skills
-```
-
-- **agent-server** (`cmd/server`): HTTP API, SSE streaming, conversation/model/workflow/MCP/skill management.
-- **agent-scheduler** (`cmd/scheduler`): a separate process that scans the task table and drives DAG sub-task planning and execution.
-- **frontend** (`frontend/`): React 18 + Vite, DAG rendering via `@xyflow/react`.
+- **Complete debugging trail**: every task preserves a full execution trace — planning thought process, MCP tool-call records (input / output / latency), task turns, context usage, and failure reasons — plus built-in pprof endpoints (block / mutex profiling) for performance analysis.
 
 ## Two ways to use
 
