@@ -1,179 +1,171 @@
 # flowagent
 
-A conversation-driven workflow orchestration framework — turn natural-language conversations into parallel DAG task graphs, executed with built-in MCP tools, skills, and context engineering.
+> Language: [English](README.md) · [中文](README.zh-CN.md)
 
-**flowagent 是一个对话驱动的全局工作流编排框架**：把自然语言对话规划成一张 DAG 子任务图，并行调度执行，前序节点的输出自动注入后续节点。Go 后端 + React 前端，内置 MCP 工具与 skill 生态。
+A conversation-driven workflow orchestration framework — turn natural-language conversations into parallel DAG task graphs, executed with built-in MCP tools, skills, and context engineering. Built with Go + React.
+
+## Quick Start
+
+Run flowagent with its built-in web UI:
+
+### Prerequisites
+
+- Go 1.25+
+- Node.js 18+
+- MySQL or SQLite (SQLite is recommended for zero-dependency startup)
+
+### 1. Prepare config
+
+```bash
+cp config/config.example.yaml config/config.yaml
+# Edit config/config.yaml: set database and llm (provider / base_url / api_key / model)
+```
+
+### 2. Build & run the backend
+
+```bash
+go build -trimpath -o bin/agent-server ./cmd/server
+go build -trimpath -o bin/agent-scheduler ./cmd/scheduler
+# or one-shot: ./build.sh
+
+./bin/agent-server -config config/config.yaml
+./bin/agent-scheduler -config config/config.yaml
+```
+
+> The database driver can be hot-switched in the frontend "System Settings" (writes `config/db_config.json`). SQLite requires no external dependencies.
+
+### 3. Run the frontend
+
+```bash
+cd frontend
+npm install
+npm run dev      # development
+npm run build    # production build to dist/
+```
+
+Open the frontend URL to chat and inspect DAG workflows.
 
 ## Why flowagent
 
-1. **好用好接入的开源 agent 框架缺失**。目前没有一个好用的开源 agent 框架可供企业或个人直接接入——要么自己从零造轮子，要么只能绑定某家云厂商的云上 agent。flowagent 想做的，就是一个**好接入、功能完善的开源 agent 框架**。
+1. **An easy-to-integrate, feature-complete open-source agent framework is missing.** Today there is no great open-source agent framework that enterprises or individuals can plug in directly — you either reinvent the wheel from scratch, or lock yourself into a cloud provider's hosted agent. flowagent aims to be exactly that: easy to integrate and feature-complete.
 
-2. **ReAct 串行太慢，DAG 并行加速长程任务**。现有 agent 大多是 ReAct 框架，规划出任务后只能一步步串行执行，长任务耗时长。flowagent 把任务规划成 **DAG**，让无依赖的子任务**并行执行**，显著加速长程任务的落地。
+2. **ReAct is serial and slow; DAG parallelism accelerates long-horizon tasks.** Most existing agents follow the ReAct loop, which executes planned steps strictly one-by-one, making long-running tasks slow. flowagent plans tasks into a **DAG** and executes independent sub-tasks **in parallel**, dramatically accelerating long-horizon tasks.
 
 ## Features
 
-- **对话 → DAG 规划**：把一段自然语言需求规划成一张有向无环图（DAG），每个节点是一个子任务，`depends_on` 表达依赖关系。
-- **并行子任务调度**：无依赖的子任务并行执行，上游节点的输出自动注入下游节点。
-- **上下文工程**：压缩（compaction）、索引、召回（recall），维持长会话智能体的一致性。
-- **MCP 工具协议**：通过 Model Context Protocol 接入外部工具，内置 stdio / SSE / streamable_http 三种传输。
-- **内置 skill 系统**：自有一等 skill（docx / pptx / shell），并打包第三方 skill（pdfkit-py、minimax-xlsx）。
-- **一对话多工作流**：一个 chat 可绑定多条工作流，节点支持增量更新与版本化。
-- **真流式 + SSE**：真正的流式输出，通过 SSE 实时推送任务进度与结果。
+- **Conversation → DAG planning**: plan a natural-language request into a directed acyclic graph (DAG) of sub-tasks, with `depends_on` expressing dependencies.
+- **Parallel sub-task scheduling**: independent sub-tasks run in parallel, with upstream outputs piped into downstream nodes.
+- **Context engineering**: compaction, indexing, and recall keep long-running agents coherent.
+- **MCP tool protocol**: integrate external tools via the Model Context Protocol, with stdio / SSE / streamable_http transports.
+- **Built-in skill system**: first-party skills (docx / pptx / shell) plus bundled third-party skills (pdfkit-py, minimax-xlsx).
+- **Multiple workflows per conversation**: one chat can drive several workflows, with incremental node updates and versioning.
 
 ## Architecture
 
 ```
 ┌──────────────┐   HTTP/SSE    ┌──────────────────┐
-│   React 前端  │ ◄───────────► │   agent-server    │
+│   React UI   │ ◄───────────► │   agent-server    │
 │    (Vite)    │               │  (Gin, :8080)     │
 └──────────────┘               └────────┬─────────┘
-                                        │ HTTP 内部回调
+                                        │ HTTP internal callback
                                ┌────────▼─────────┐
                                │  agent-scheduler   │
-                               │  (Stage 调度器)    │
+                               │  (Stage scheduler) │
                                └────────┬─────────┘
                                         │
                         ┌───────────────┼───────────────┐
                         ▼               ▼               ▼
-                     MySQL/SQLite     MCP 工具        Skills
+                     MySQL/SQLite     MCP tools      Skills
 ```
 
-- **agent-server**（`cmd/server`）：HTTP API、SSE 流式、对话/模型/工作流/MCP/skill 管理。
-- **agent-scheduler**（`cmd/scheduler`）：独立进程，扫描任务表，驱动 DAG 子任务的规划与执行。
-- **frontend**（`frontend/`）：React 18 + Vite，DAG 渲染基于 `@xyflow/react`。
+- **agent-server** (`cmd/server`): HTTP API, SSE streaming, conversation/model/workflow/MCP/skill management.
+- **agent-scheduler** (`cmd/scheduler`): a separate process that scans the task table and drives DAG sub-task planning and execution.
+- **frontend** (`frontend/`): React 18 + Vite, DAG rendering via `@xyflow/react`.
 
-## 两种使用方式
+## Two ways to use
 
-### 方式一：使用自带前端（开箱即用）
+### 1. Use the built-in frontend
 
-flowagent 自带一个完整的 Web UI，包含对话、工作流 DAG 可视化、模型配置、MCP/skill 管理等功能。
+flowagent ships a complete web UI with chat, workflow DAG visualization, model configuration, and MCP/skill management. See [Quick Start](#quick-start) to get running.
 
-```bash
-# 1. 准备配置
-cp config/config.example.yaml config/config.yaml
-# 编辑 config/config.yaml，填入数据库与模型信息（详见 Quick Start）
+### 2. Use flowagent as your core agent engine (API)
 
-# 2. 启动后端（两个进程）
-./bin/agent-server -config config/config.yaml
-./bin/agent-scheduler -config config/config.yaml
-
-# 3. 启动前端
-cd frontend && npm install && npm run dev
-```
-
-打开前端地址即可对话、查看 DAG 工作流。
-
-### 方式二：作为核心 agent 引擎（API 接入）
-
-把 flowagent 当作你项目的「agent 内核」，通过 HTTP API 驱动。最小接入流程三步：
+Treat flowagent as the "agent kernel" of your own project and drive it over HTTP. Minimal integration is three steps:
 
 ```bash
-# ① 创建对话
+# ① Create a conversation
 curl -X POST http://localhost:8080/api/v1/conversations/create \
   -H 'Content-Type: application/json' \
-  -d '{"title":"我的任务"}'
+  -d '{"title":"my task"}'
 # → {"code":0,"data":{"chat_id":"<CHAT_ID>", ...}}
 
-# ② 发送消息（异步创建任务，返回 task_id）
+# ② Send a message (creates an async task, returns task_id)
 curl -X POST http://localhost:8080/api/v1/conversations/chat \
   -H 'Content-Type: application/json' \
-  -d '{"chat_id":"<CHAT_ID>","input_text":"帮我调研一下 X 并生成报告"}'
+  -d '{"chat_id":"<CHAT_ID>","input_text":"Research X and write a report"}'
 # → {"code":0,"data":{"task_id":"<TASK_ID>"}}
 
-# ③ 流式接收结果（SSE）或轮询任务详情
+# ③ Stream results (SSE) or poll task detail
 curl -N "http://localhost:8080/api/v1/tasks/stream?task_id=<TASK_ID>"
 curl -X POST http://localhost:8080/api/v1/tasks/detail \
   -H 'Content-Type: application/json' \
   -d '{"task_id":"<TASK_ID>"}'
 ```
 
-任务分两种类型（`task_type`）：
+Tasks are of two types (`task_type`):
 
-| 类型 | 含义 | 输出结构 |
+| Type | Meaning | Output |
 |---|---|---|
-| `SINGLE_AGENT` | 单 agent 直接处理（理解 → MCP 工具调用 → 返回） | `agent_output` |
-| `WORKFLOW_AGENT` | 先规划 DAG，再并行执行子任务 | `workflow_output`（含 `nodes` 依赖图） |
+| `SINGLE_AGENT` | Single agent handles the request directly (understand → MCP tool calls → reply) | `agent_output` |
+| `WORKFLOW_AGENT` | Plans a DAG first, then executes sub-tasks in parallel | `workflow_output` (with `nodes` dependency graph) |
 
-## API 概览
+## API Overview
 
-所有接口位于 `/api/v1` 下，统一 JSON 包装 `{"code":0,"msg":"...","data":...}`。除 SSE 与文件上传/下载外均为 `POST`。
+All endpoints live under `/api/v1`, wrapped in a unified JSON envelope `{"code":0,"msg":"...","data":...}`. Except SSE and file upload/download, all are `POST`.
 
-| 模块 | 端点 | 说明 |
+| Module | Endpoints | Description |
 |---|---|---|
-| 对话 | `POST /conversations/create` | 创建对话 |
-| | `POST /conversations/chat` | 发消息，返回 `task_id` |
-| | `POST /conversations/list` / `detail` / `delete` | 列表 / 详情 / 删除 |
-| | `POST /conversations/mcp/*` · `/skills/*` | 对话级 MCP / skill 绑定 |
-| 任务 | `POST /tasks/detail` / `stop` / `retry` / `turns` | 任务详情 / 停止 / 重试 / 轮次 |
-| | `GET /tasks/stream` | SSE 流式输出 |
-| 模型 | `POST /models/list` / `create` / `update` / `delete` / `set-default` / `test` / `status` | 全局模型配置 |
-| MCP | `POST /mcp/servers/*` | MCP 服务器增删改查、连接测试、内置清单导入 |
-| Skill | `POST /skills/*` | skill 增删改查、内置清单导入、zip 导入 |
-| 文件 | `POST /files/upload` · `GET /files/download` / `open` | 工作区文件上传 / 下载 / 本地打开 |
-| 设置 | `POST /settings/db/*` · `POST /search-config/*` | 数据库连接、检索引擎配置 |
+| Conversation | `POST /conversations/create` | Create a conversation |
+| | `POST /conversations/chat` | Send a message, returns `task_id` |
+| | `POST /conversations/list` / `detail` / `delete` | List / detail / delete |
+| | `POST /conversations/mcp/*` · `/skills/*` | Per-conversation MCP / skill binding |
+| Task | `POST /tasks/detail` / `stop` / `retry` / `turns` | Detail / stop / retry / turns |
+| | `GET /tasks/stream` | SSE streaming output |
+| Model | `POST /models/list` / `create` / `update` / `delete` / `set-default` / `test` / `status` | Global model config |
+| MCP | `POST /mcp/servers/*` | CRUD, connection test, built-in import |
+| Skill | `POST /skills/*` | CRUD, built-in import, zip import |
+| File | `POST /files/upload` · `GET /files/download` / `open` | Workspace file upload / download / open |
+| Settings | `POST /settings/db/*` · `POST /search-config/*` | Database connection, search engine config |
 
-完整的数据结构定义见 [`api/v1/workflow_agent.proto`](api/v1/workflow_agent.proto)。
+See [`api/v1/workflow_agent.proto`](api/v1/workflow_agent.proto) for the full data structures.
 
-## Quick Start
-
-### 依赖
-
-- Go 1.25+
-- Node.js 18+（仅方式一的前端需要）
-- MySQL 或 SQLite（开箱建议 SQLite 零依赖）
-
-### 后端
-
-```bash
-cp config/config.example.yaml config/config.yaml
-# 编辑 config/config.yaml，配置 database 与 llm（provider/base_url/api_key/model）
-
-go build -trimpath -o bin/agent-server ./cmd/server
-go build -trimpath -o bin/agent-scheduler ./cmd/scheduler
-# 或一键 ./build.sh
-
-./bin/agent-server -config config/config.yaml
-./bin/agent-scheduler -config config/config.yaml
-```
-
-> 数据库驱动可在前端「系统设置」里热切换（写入 `config/db_config.json`）。用 SQLite 时无需任何外部依赖。
-
-### 前端
-
-```bash
-cd frontend
-npm install
-npm run dev        # 开发模式
-npm run build      # 生产构建到 dist/
-```
-
-## 目录结构
+## Directory Structure
 
 ```
 flowagent/
 ├── cmd/
-│   ├── server/        # HTTP API 服务入口
-│   └── scheduler/     # Stage 调度器入口（独立进程）
-├── handler/           # HTTP 路由与处理器
-├── dao/               # 数据访问层
-├── model/             # 数据模型
-├── schedule/          # 调度核心：DAG 规划、子任务执行、上下文压缩
+│   ├── server/        # HTTP API server entry
+│   └── scheduler/     # Stage scheduler entry (separate process)
+├── handler/           # HTTP routes & handlers
+├── dao/               # Data access layer
+├── model/             # Data models
+├── schedule/          # Scheduling core: DAG planning, sub-task execution, context compaction
 ├── pkg/
-│   ├── llm/           # LLM 客户端（gemini / openai / azure / claude）
-│   ├── mcp/           # MCP 工具协议
-│   ├── skill/         # skill 系统
-│   ├── stream/        # SSE 与跨进程事件转发
-│   └── workspace/     # 工作区与文件工具（沙箱约束）
-├── mcp/builtins/      # 内置 MCP 清单
-├── skills/            # 内置 skill
-├── api/v1/            # API 定义（proto）
-├── frontend/          # React 前端
-├── config/            # 配置示例（example）
-└── docs/              # 文档
+│   ├── llm/           # LLM clients (gemini / openai / azure / claude)
+│   ├── mcp/           # MCP tool protocol
+│   ├── skill/         # Skill system
+│   ├── stream/        # SSE & cross-process event forwarding
+│   └── workspace/     # Workspace & file tools (sandboxed)
+├── mcp/builtins/      # Built-in MCP manifests
+├── skills/            # Built-in skills
+├── api/v1/            # API definitions (proto)
+├── frontend/          # React frontend
+├── config/            # Config examples
+└── docs/              # Docs
 ```
 
 ## License
 
-[Apache License 2.0](LICENSE)。
+[Apache License 2.0](LICENSE).
 
-第三方组件许可详见 [NOTICE](NOTICE)。其中 `skills/pdfkit-py` 依赖 PyMuPDF（AGPL-3.0），该目录不受本仓库 Apache-2.0 覆盖，启用该 skill 需自行遵守 AGPL 条款。
+Third-party component notices are in [NOTICE](NOTICE). In particular, `skills/pdfkit-py` depends on PyMuPDF (AGPL-3.0); that directory is not covered by this repo's Apache-2.0 license, and enabling it requires you to comply with the AGPL terms.
