@@ -1,0 +1,14 @@
+{
+  "key": "filesystem",
+  "name": "filesystem",
+  "description": "本地文件系统 MCP（@modelcontextprotocol/server-filesystem）。允许 Agent 读写指定目录下的文件。默认根目录为当前用户家目录，可按需修改 args 中的路径。",
+  "transport": "stdio",
+  "command": "npx",
+  "args": [
+    "-y",
+    "@modelcontextprotocol/server-filesystem",
+    "${HOME}"
+  ],
+  "env": {},
+  "description_en": "Local filesystem MCP (@modelcontextprotocol/server-filesystem). Lets the Agent read and write files under specified directories. Defaults to the current user's home directory; adjust the path in args as needed."
+}

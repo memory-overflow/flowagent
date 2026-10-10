@@ -1,0 +1,14 @@
+{
+  "key": "fetch",
+  "name": "fetch",
+  "description": "网页抓取 MCP（mcp-server-fetch，Python）。将任意 URL 抓下来并转成 Markdown，供 LLM 阅读。无 UI，纯后台抓取。",
+  "transport": "stdio",
+  "command": "uvx",
+  "args": [
+    "--with",
+    "mcp<1.13",
+    "mcp-server-fetch"
+  ],
+  "env": {},
+  "description_en": "Web page fetching MCP (mcp-server-fetch, Python). Downloads any URL and converts it to Markdown for the LLM to read. No UI, pure background fetching."
+}

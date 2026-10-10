@@ -1,0 +1,13 @@
+{
+  "key": "terminal",
+  "name": "terminal",
+  "description": "终端命令执行 MCP（mcp-server-commands，Node）。通过 run_process 工具在宿主机上跑任意 shell 命令并返回 stdout/stderr。⚠️ 该 MCP 会以当前进程权限执行任何命令，请在 MCP 管理页评估是否启用，并避免与 sudo 同用。",
+  "transport": "stdio",
+  "command": "npx",
+  "args": [
+    "-y",
+    "mcp-server-commands"
+  ],
+  "env": {},
+  "description_en": "Terminal command execution MCP (mcp-server-commands, Node). Runs arbitrary shell commands on the host via the run_process tool and returns stdout/stderr. ⚠️ Runs any command with the current process privileges — evaluate carefully on the MCP page and avoid combining with sudo."
+}

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Workflow Agent</title>
+    <script>
+      // 首屏防闪烁：在 CSS 生效前把主题打到 <html> 上。
+      // 否则 :root 的深色默认值会先画一帧，跟随系统的浅色用户会看到闪黑。
+      (function () {
+        try {
+          var mode = localStorage.getItem('flowagent.theme') || 'system';
+          // 判定口径必须和 src/theme.tsx 的 systemTheme() 一致（dark query，
+          // 取不到时回落 dark），否则两边算出的主题不同会闪一下。
+          var resolved = mode === 'system'
+            ? (!window.matchMedia || window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+            : mode;
+          document.documentElement.setAttribute('data-theme', resolved);
+          document.documentElement.style.colorScheme = resolved;
+        } catch (e) { /* 读不到存储就用深色基线 */ }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

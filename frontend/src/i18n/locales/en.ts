@@ -1,0 +1,237 @@
+/**
+ * English dictionary.
+ *
+ * Same key structure as ./zh.ts — keep the two files in lockstep.
+ * Keys missing here fall back to Chinese at runtime (see ../index.tsx),
+ * so partial translation never breaks the UI.
+ */
+export const en = {
+  common: {
+    save: 'Save',
+    saving: 'Saving…',
+    cancel: 'Cancel',
+    confirm: 'Confirm',
+    delete: 'Delete',
+    deleting: 'Deleting…',
+    edit: 'Edit',
+    add: 'Add',
+    create: 'Create',
+    creating: 'Creating…',
+    refresh: 'Refresh',
+    loading: 'Loading...',
+    retry: 'Retry',
+    stop: 'Stop',
+    copy: 'Copy',
+    copied: 'Copied',
+    close: 'Close',
+    enable: 'Enable',
+    disable: 'Disable',
+    enabled: 'Enabled',
+    disabled: 'Disabled',
+    yes: 'Yes',
+    no: 'No',
+    on: 'On',
+    off: 'Off',
+    all: 'All',
+    none: 'None',
+    search: 'Search',
+    name: 'Name',
+    desc: 'Description',
+    status: 'Status',
+    type: 'Type',
+    action: 'Actions',
+    time: 'Time',
+    detail: 'Details',
+    expand: 'Expand',
+    collapse: 'Collapse',
+    more: 'More',
+    optional: 'Optional',
+    required: 'Required',
+    unknown: 'Unknown',
+    empty: '(empty)',
+    total: '{n} items',
+    seconds: '{n}s',
+  },
+
+  nav: {
+    chats: 'Chats',
+    mcp: 'MCP',
+    skills: 'Skills',
+    models: 'Models',
+    search: 'Search',
+    settings: 'Settings',
+    newChat: 'New chat',
+    searchPlaceholder: 'Search conversations…',
+    noConversations: 'No conversations yet',
+    collapseSidebar: 'Collapse sidebar',
+    expandSidebar: 'Expand sidebar',
+    deleteConfirm: 'Delete this conversation? This cannot be undone.',
+  },
+
+  welcome: {
+    title: 'Workflow Agent',
+    desc:
+      'A general-purpose workflow agent platform. Run single-agent conversations or DAG workflow orchestration, plug in external tools over MCP, and let AI finish complex tasks.',
+    newChat: 'New chat',
+    createFailed: 'Failed to create conversation: {msg}',
+  },
+
+  // First-run setup gate (blocks the app when no usable model is configured)
+  setup: {
+    title: 'Configure a model first',
+    desc:
+      'No usable model has been configured yet. Workflow Agent needs at least one enabled model to run conversations and workflows — please add one to continue.',
+    step1: 'Pick a protocol: OpenAI-compatible / Gemini / Azure OpenAI / Claude',
+    step2: 'Fill in the Base URL, API key and model name',
+    step3: 'Click “Test” to confirm connectivity, then save',
+    addModel: 'Add model',
+    hint:
+      'The first model you add becomes the default automatically. You can edit, delete or switch the default later on the Models page.',
+  },
+
+  preferences: {
+    cardTitle: 'Appearance & language',
+    cardDesc: 'Interface language and color theme. Stored in this browser only.',
+    language: 'Language',
+    languageHint: 'Takes effect immediately, no reload needed.',
+    langZh: '中文',
+    langEn: 'English',
+    theme: 'Theme',
+    themeHint: '“Follow system” switches with your OS light/dark setting.',
+    themeLight: 'Light',
+    themeDark: 'Dark',
+    themeSystem: 'Follow system',
+    themeSystemResolved: '(currently {theme})',
+    themeLightName: 'light',
+    themeDarkName: 'dark',
+  },
+
+  settings: {
+    title: 'Settings',
+    introLead:
+      'Database connection. Cloud MySQL pays a public-network round trip on every query, so for local debugging you can switch to a local MySQL or sqlite (a plain local file, zero network). Config is stored on the server at',
+    introTail:
+      ', never in conf.yaml, and the password never reaches the repo. Saving takes effect immediately with no restart (the scheduler follows within 2 seconds).',
+    activeDesc: 'Currently in use: ',
+    matches: ' (matches the settings below)',
+    mismatch: ' (differs from the settings below — saving switches to them immediately)',
+    dbType: 'Database type',
+    sqliteOption: 'SQLite (local file, zero dependencies)',
+    host: 'Host',
+    port: 'Port',
+    user: 'User',
+    password: 'Password',
+    dbname: 'Database',
+    charset: 'Charset',
+    dbPath: 'Database file path',
+    pathHint: 'Missing directories are created automatically. Tables are created on first start.',
+    testConn: 'Test connection',
+    testing: 'Testing...',
+    saved: 'Saved and applied',
+    saveFailed: 'Failed to save: {msg}',
+    testFailed: 'Test failed: {msg}',
+    connectOkLabel: 'Connected',
+    connectOk: '✅ Connected',
+    connectFail: '❌ Connection failed',
+  },
+
+  status: {
+    pending: 'Queued',
+    running: 'Running',
+    completed: 'Completed',
+    failed: 'Failed',
+    cancelled: 'Stopped',
+    partialFailed: 'Partially failed',
+    abandoned: 'Abandoned',
+  },
+
+  sidebar: {
+    newShort: '+ New',
+    createFailed: 'Failed to create: {msg}',
+    deleteFailed: 'Failed to delete: {msg}',
+    renameFailed: 'Failed to rename: {msg}',
+    untitled: 'Untitled conversation',
+    emptyHint: 'No conversations yet — click "New" to start',
+    rename: 'Rename',
+    runningTitle: 'A task or workflow is running',
+    failedTitle: 'A task or workflow failed',
+    mcpTitle: 'MCP tools',
+    mcpHintTitle: 'MCP server management',
+    mcpHintDesc:
+      'Create, edit and test MCP servers in the panel on the right. Tools can be mounted per conversation above the input box.',
+    skillsTitle: 'Skills',
+    skillsHintTitle: 'Skill management',
+    skillsHintDesc:
+      'Create, edit and import skills in the panel on the right. Instruction skills are injected into the system prompt, executable ones are exposed to the model as tools; both can be enabled per conversation.',
+    modelsTitle: 'Models',
+    modelsHintTitle: 'Global model configuration',
+    modelsHintDesc:
+      'Add, edit and remove models in the panel on the right. Supports OpenAI-compatible / Gemini / Azure OpenAI (gpt) / Claude protocols; pick a model per conversation, or fall back to the default.',
+    searchTitle: 'Search engines',
+    searchHintTitle: 'Global search engine configuration',
+    searchHintDesc:
+      'Switch the engine used by deep_search in the panel on the right. Baidu is the default (no key needed); Bocha / Tavily / Serper need an API key, and failures fall back to Baidu.',
+  },
+
+  errorBoundary: {
+    title: 'Something went wrong',
+    desc: 'Reload the page and try again. If it keeps happening, send the error below to a developer.',
+    reload: 'Reload',
+    recover: 'Try to recover',
+  },
+
+  duration: {
+    runningTip: '{label} {elapsed}　started at {start}, still running (includes queueing and waiting)',
+    doneTip: '{label} {elapsed}　{start} → {end} (wall clock, includes queueing and waiting)',
+  },
+
+  files: {
+    preview: 'Preview',
+    previewX: 'Preview {name}',
+    open: 'Open',
+    opening: 'Opening…',
+    openX: 'Open {name}',
+    openLocal: 'Open local file',
+    openFailed: 'Failed to open: {msg}',
+    collapseAll: 'Collapse',
+    expandAll: 'Show all {n} files',
+    loading: 'Loading…',
+    readFailed: 'Could not read the content. Open the local file instead.',
+    tooLarge: 'File too large for inline preview. Open the local file instead.',
+    unsupported: 'This type cannot be previewed in the browser — use the button below to open the local file.',
+    closePreview: 'Close preview',
+  },
+
+  toolCalls: {
+    tool: 'Tool: ',
+    args: 'Args: ',
+    collapseAll: 'Collapse tool calls',
+    expandAll: 'Show all {n} tool calls ({hidden} more)',
+  },
+
+  context: {
+    title: 'Context usage',
+    pillTip: 'Context used {percent}% · {used} / {limit}',
+    used: 'Used {used} / {limit}',
+    triggerLine: 'Compaction trigger at {n} (80% of the limit)',
+    source: 'Source: turn #{seq} ({phase})',
+    providerTok: '{n} tok measured by the provider',
+    noRecord: 'No calls recorded yet',
+    block: {
+      system: 'System prompt',
+      systemDesc: 'Agent persona / tool guidance / planning context (never compacted)',
+      tools: 'Tool definitions',
+      toolsDesc: 'Tool JSON Schema, resent in full every round (never compacted)',
+      wfSummary: 'Workflow summary',
+      wfSummaryDesc: 'Collapsed summary of past workflows, itself a compaction product (never compacted)',
+      compacted: 'Compacted history',
+      compactedDesc: 'Rolling working notes produced by context compaction',
+      history: 'History messages',
+      historyDesc: 'Past task interactions not yet compacted',
+      current: 'Current input & task',
+      currentDesc: "This round's user input plus the current task's interactions (never compacted)",
+    },
+  },
+
+  // __APPEND_MARKER__
+};

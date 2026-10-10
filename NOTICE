@@ -1,0 +1,43 @@
+flowagent
+Copyright 2026 memory-overflow contributors
+
+This product includes software developed by third parties. The notices
+below are for informational purposes only and do not modify the license
+(Apache License 2.0) under which the rest of this repository is distributed.
+
+--------------------------------------------------------------------------------
+
+1. skills/pdfkit-py
+
+   Source: the "PDFKit" skill published by Tencent Docs (腾讯文档).
+
+   This directory is a bundled third-party skill and is NOT covered by this
+   repository's Apache License 2.0. Its own terms of use are unspecified
+   upstream, so redistributors are responsible for verifying the rights
+   applicable to this component before redistribution.
+
+   It depends on PyMuPDF, which is licensed under the GNU Affero General
+   Public License v3.0 (AGPL-3.0). Enabling this skill requires you to
+   comply with the AGPL-3.0 terms for that dependency.
+
+2. skills/minimax-xlsx
+
+   Source: the "Excel 文件处理" skill.
+
+   Its source files carry "SPDX-License-Identifier: MIT" headers and are
+   redistributed under the MIT License.
+
+3. skills/docx, skills/pptx, skills/builtins
+
+   First-party components of this repository, licensed under the Apache
+   License 2.0.
+
+4. Frontend dependencies (frontend/package.json)
+
+   Distributed via npm; see frontend/package-lock.json for the complete
+   dependency graph. They are predominantly MIT / BSD / ISC licensed.
+
+5. Go module dependencies (go.mod / go.sum)
+
+   See the respective module licenses. Notable: github.com/go-sql-driver/mysql
+   is MPL-2.0; golang.org/x/* and standard library are BSD-3-Clause.

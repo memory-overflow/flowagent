@@ -1,0 +1,14 @@
+{
+  "key": "git",
+  "name": "git",
+  "description": "Git 仓库操作 MCP（mcp-server-git，Python）。支持 status / diff / log / show / add / commit 等本地仓库操作。安装：pip install mcp-server-git 或使用 uvx 直跑。",
+  "transport": "stdio",
+  "command": "uvx",
+  "args": [
+    "--with",
+    "mcp<1.13",
+    "mcp-server-git"
+  ],
+  "env": {},
+  "description_en": "Git repository MCP (mcp-server-git, Python). Supports status / diff / log / show / add / commit and other local repository operations. Install: pip install mcp-server-git."
+}

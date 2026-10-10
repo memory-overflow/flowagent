@@ -1,0 +1,17 @@
+{
+  "key": "playwright",
+  "name": "playwright",
+  "description": "Playwright 浏览器自动化 MCP（默认弹出真实浏览器窗口，可视化操作）。首次运行会自动下载浏览器。",
+  "transport": "stdio",
+  "command": "npx",
+  "args": [
+    "-y",
+    "@playwright/mcp@latest",
+    "--browser",
+    "chrome",
+    "--viewport-size",
+    "1280,800"
+  ],
+  "env": {},
+  "description_en": "Playwright browser automation MCP (opens a real browser window by default, visually operable). Browsers are downloaded automatically on first run."
+}

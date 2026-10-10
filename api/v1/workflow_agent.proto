@@ -1,0 +1,469 @@
+syntax = "proto3";
+
+package workflow.agent.v1;
+
+option go_package = "github.com/memory-overflow/flowagent/api/v1;apiv1";
+
+// ============================================================
+// 通用结构
+// ============================================================
+
+// 文件类型
+enum FileType {
+  FILE_TYPE_UNSPECIFIED = 0;
+  FILE_TYPE_IMAGE = 1;
+  FILE_TYPE_VIDEO = 2;
+  FILE_TYPE_TEXT = 3;
+  // 其他二进制文件（PDF、ZIP 等）
+  FILE_TYPE_OTHER = 4;
+}
+
+// 文件信息 — 支持本地文件和远程文件两种模式
+message FileInfo {
+  // 文件来源: "local" | "remote"
+  string source = 1;
+  // 文件名
+  string name = 2;
+  // source=local 时必填，服务器绝对路径
+  string path = 3;
+  // source=remote 时必填，文件访问 URL
+  string url = 4;
+  // 文件大小（字节）
+  int64 size = 5;
+  // MIME 类型
+  string mime_type = 6;
+  // 文件类型
+  FileType file_type = 7;
+}
+
+// ============================================================
+// 对话 & 任务结构
+// ============================================================
+
+// 任务输入
+message TaskInput {
+  string input_text = 1;
+  // 输入的文件（图片/视频/文本等，通过 FileInfo.file_type 区分）
+  repeated FileInfo input_files = 2;
+}
+
+// MCP 工具调用记录
+message ToolCallRecord {
+  string tool_name = 1;
+  string server_name = 2;
+  string input = 3;   // JSON 字符串
+  string output = 4;  // JSON 字符串
+  // 1-成功，2-失败
+  int32 status = 5;
+  // 耗时，如 "3.2s"
+  string time_cost = 6;
+  // 模型在工具调用 schema 的 summary 参数里写的一句话说明
+  // （B 方案：工具 schema 强制 summary 必填）。前端 ToolCalls 块
+  // 默认展示 summary，让用户清楚「这次调用在做什么」。
+  string summary = 7;
+}
+
+// ============================================================
+// 任务类型 & 输出
+// ============================================================
+
+// 任务类型
+enum TaskType {
+  TASK_TYPE_UNSPECIFIED = 0;
+  // 单 agent 任务 — agent 直接处理请求并返回结果
+  TASK_TYPE_SINGLE_AGENT = 1;
+  // 工作流 agent 任务 — agent 先规划出 DAG，再逐个执行子任务
+  TASK_TYPE_WORKFLOW_AGENT = 2;
+}
+
+// 任务状态枚举
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_QUEUED = 1;          // 排队中
+  TASK_STATUS_RUNNING = 2;         // 进行中
+  TASK_STATUS_COMPLETED = 3;       // 已完成
+  TASK_STATUS_FAILED = 4;          // 任务失败
+  TASK_STATUS_STOPPED = 5;         // 已终止
+  TASK_STATUS_PARTIAL_FAILED = 6;  // 部分失败
+}
+
+// 单 agent 任务输出
+// 对应用户直接对话场景：模型理解 → MCP 工具调用 → 返回结果
+message AgentOutput {
+  // 文本回复
+  string reply_text = 1;
+  // 输出的文件（图片/视频/文本等，通过 FileInfo.file_type 区分）
+  repeated FileInfo output_files = 2;
+  // 工具调用记录
+  repeated ToolCallRecord tool_calls = 3;
+  // 思考过程
+  repeated string think_process = 4;
+}
+
+// DAG 工作流节点
+// 每个节点代表一个由父 agent 规划出的子任务，最终会被调度为独立的 Task
+message WorkflowNode {
+  // 节点 ID（工作流内唯一）
+  string node_id = 1;
+  // 节点名称（人类可读）
+  string name = 2;
+  // 节点描述（这个子任务要做什么）
+  string description = 3;
+  // 该节点的输入（由父 agent 规划时填充）
+  TaskInput input = 4;
+  // 依赖的前置节点 ID 列表（拓扑排序依据）
+  repeated string depends_on = 5;
+
+  // ---- 以下字段在调度执行后逐步填充 ----
+  // 调度后关联的子任务 ID
+  string task_id = 6;
+  // 节点执行状态
+  TaskStatus status = 7;
+  // 节点执行结果（子任务完成后回填）
+  AgentOutput output = 8;
+}
+
+// 工作流 agent 任务输出
+// 对应用户复杂任务场景：agent 分析需求 → 规划 DAG → 逐个派发子任务执行
+message WorkflowOutput {
+  // 预拆分的 DAG 工作流（节点列表 + 依赖关系构成完整的 DAG）
+  repeated WorkflowNode nodes = 1;
+
+  // ---- 规划阶段产物 ----
+  // 规划摘要（agent 对整体方案的文本说明）
+  string plan_summary = 2;
+  // 规划阶段的 MCP 工具调用（如搜索、读取文件等辅助规划的操作）
+  repeated ToolCallRecord tool_calls = 3;
+  // 规划阶段的思考过程
+  repeated string think_process = 4;
+}
+
+// ============================================================
+// 任务详情
+// ============================================================
+
+// 任务详情 — 使用 oneof 区分单 agent 和工作流两种输出
+message TaskDetail {
+  // 任务 ID
+  string task_id = 1;
+  // 所属对话 ID
+  string chat_id = 2;
+  // 父任务 ID — 当本任务是工作流的子任务时有值
+  string parent_task_id = 3;
+  // 任务类型
+  TaskType task_type = 4;
+  // 任务输入
+  TaskInput task_input = 5;
+  // 任务状态
+  TaskStatus task_status = 6;
+  // 进度 0.0 ~ 100.0
+  float progress = 7;
+  // 失败原因（成功时为空）
+  string failed_reason = 8;
+  // 创建时间（毫秒时间戳）
+  int64 create_ts = 9;
+  // 开始执行时间（毫秒时间戳）
+  int64 start_ts = 10;
+  // 结束时间（毫秒时间戳）
+  int64 end_ts = 11;
+  // 耗时，如 "15.3s"
+  string time_cost = 12;
+
+  // 根据 task_type 使用不同的输出结构
+  oneof output {
+    // task_type = SINGLE_AGENT 时使用
+    AgentOutput agent_output = 13;
+    // task_type = WORKFLOW_AGENT 时使用
+    WorkflowOutput workflow_output = 14;
+  }
+}
+
+// ============================================================
+// 对话结构
+// ============================================================
+
+// 对话关联的 MCP 服务器
+message ConversationMCPServer {
+  string server_id = 1;
+  string name = 2;
+  bool enabled = 3;
+}
+
+// 对话状态枚举
+enum ConversationStatus {
+  CONVERSATION_STATUS_UNSPECIFIED = 0;
+  CONVERSATION_STATUS_ACTIVE = 1;    // 进行中
+  CONVERSATION_STATUS_COMPLETED = 2; // 已完成
+  CONVERSATION_STATUS_ARCHIVED = 3;  // 已归档
+}
+
+// 对话摘要
+message ConversationInfo {
+  string chat_id = 1;
+  string title = 2;
+  ConversationStatus status = 3;
+  string create_user = 4;
+  int64 create_ts = 5;
+  int64 update_ts = 6;
+  int32 task_count = 7;
+  string preview = 8;
+  repeated ConversationMCPServer mcp_servers = 9;
+}
+
+// ============================================================
+// 对话模块 — 请求 & 响应
+// ============================================================
+
+// ---- 创建对话 ----
+message CreateConversationRequest {
+  string title = 1;
+  repeated string mcp_server_ids = 2;
+}
+
+message CreateConversationResponse {
+  ConversationInfo data = 1;
+}
+
+// ---- 发送消息 ----
+message ChatRequest {
+  string chat_id = 1;
+  string input_text = 2;
+  repeated FileInfo input_files = 3;
+}
+
+message ChatResponse {
+  string task_id = 1;
+}
+
+// ---- 获取任务详情 ----
+message GetTaskDetailRequest {
+  string task_id = 1;
+}
+
+message GetTaskDetailResponse {
+  TaskDetail data = 1;
+}
+
+// ---- 停止任务 ----
+// 如果是工作流任务，会同时停止所有未完成的子任务
+message StopTaskRequest {
+  string task_id = 1;
+}
+
+// ---- 对话列表 ----
+message ListConversationsRequest {
+  int64 last_ts = 1;      // 瀑布流分页
+  string keyword = 2;     // 模糊搜索
+  int32 page_size = 3;    // 默认 20
+}
+
+message ListConversationsResponse {
+  repeated ConversationInfo list = 1;
+  int32 total = 2;
+  bool has_more = 3;
+}
+
+// ---- 对话详情 ----
+message GetConversationDetailRequest {
+  string chat_id = 1;
+}
+
+message GetConversationDetailResponse {
+  ConversationInfo chat_info = 1;
+  repeated TaskDetail tasks = 2;
+}
+
+// ---- 删除对话 ----
+message DeleteConversationRequest {
+  string chat_id = 1;
+}
+
+// ---- 对话 MCP: 列表 ----
+message ListConversationMCPRequest {
+  string chat_id = 1;
+}
+
+message ListConversationMCPResponse {
+  repeated ConversationMCPServer data = 1;
+}
+
+// ---- 对话 MCP: 添加 ----
+message AddConversationMCPRequest {
+  string chat_id = 1;
+  repeated string server_ids = 2;
+}
+
+// ---- 对话 MCP: 移除 ----
+message RemoveConversationMCPRequest {
+  string chat_id = 1;
+  repeated string server_ids = 2;
+}
+
+// ============================================================
+// MCP 管理模块 — 请求 & 响应
+// ============================================================
+
+// MCP 连接状态
+enum MCPServerStatus {
+  MCP_SERVER_STATUS_UNSPECIFIED = 0;
+  MCP_SERVER_STATUS_CONNECTED = 1;    // 已连接
+  MCP_SERVER_STATUS_DISCONNECTED = 2; // 未连接
+  MCP_SERVER_STATUS_ERROR = 3;        // 连接失败
+}
+
+// MCP 服务器配置
+message MCPServerConfig {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string transport = 4;               // "stdio" | "sse" | "streamable_http"
+  string command = 5;                 // stdio 模式
+  repeated string args = 6;           // stdio 模式
+  map<string, string> env = 7;        // 环境变量
+  string url = 8;                     // sse / streamable_http 模式
+  map<string, string> headers = 9;    // HTTP 请求头
+  MCPServerStatus status = 10;
+  int32 tools_count = 11;
+  int64 create_ts = 12;
+  int64 update_ts = 13;
+}
+
+// ---- 列表 ----
+message ListMCPServersRequest {
+  string keyword = 1;
+}
+
+message ListMCPServersResponse {
+  repeated MCPServerConfig list = 1;
+}
+
+// ---- 详情 ----
+message GetMCPServerDetailRequest {
+  string server_id = 1;
+}
+
+message GetMCPServerDetailResponse {
+  MCPServerConfig data = 1;
+}
+
+// ---- 创建 ----
+message CreateMCPServerRequest {
+  string name = 1;
+  string description = 2;
+  string transport = 3;
+  string command = 4;
+  repeated string args = 5;
+  map<string, string> env = 6;
+  string url = 7;
+  map<string, string> headers = 8;
+}
+
+message CreateMCPServerResponse {
+  MCPServerConfig data = 1;
+}
+
+// ---- 更新 ----
+message UpdateMCPServerRequest {
+  string server_id = 1;
+  string name = 2;
+  string description = 3;
+  string transport = 4;
+  string command = 5;
+  repeated string args = 6;
+  map<string, string> env = 7;
+  string url = 8;
+  map<string, string> headers = 9;
+}
+
+message UpdateMCPServerResponse {
+  MCPServerConfig data = 1;
+}
+
+// ---- 删除 ----
+message DeleteMCPServerRequest {
+  string server_id = 1;
+}
+
+// ---- 测试连接 ----
+message TestMCPServerRequest {
+  // 二选一：已有 server_id 或新配置
+  string server_id = 1;
+  string name = 2;
+  string description = 3;
+  string transport = 4;
+  string command = 5;
+  repeated string args = 6;
+  map<string, string> env = 7;
+  string url = 8;
+  map<string, string> headers = 9;
+}
+
+message MCPToolInfo {
+  string name = 1;
+  string description = 2;
+  // JSON Schema 入参定义
+  string input_schema = 3;
+}
+
+message TestMCPServerResponse {
+  bool success = 1;
+  string error_msg = 2;
+  repeated MCPToolInfo tools = 3;
+}
+
+// ============================================================
+// 通用响应包装
+// ============================================================
+
+// 用于 HTTP JSON 网关的统一响应层
+// 实际 gRPC 中可以用 error 状态码代替 code/msg，这里保留以兼容 HTTP 网关
+message CommonResponse {
+  int32 code = 1;
+  string msg = 2;
+  string req_id = 3;
+}
+
+// ============================================================
+// 服务定义 (gRPC)
+// ============================================================
+
+service ConversationService {
+  // 创建对话
+  rpc CreateConversation(CreateConversationRequest) returns (CreateConversationResponse);
+  // 发送消息（创建异步任务）
+  rpc Chat(ChatRequest) returns (ChatResponse);
+  // 对话列表
+  rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse);
+  // 对话详情
+  rpc GetConversationDetail(GetConversationDetailRequest) returns (GetConversationDetailResponse);
+  // 删除对话
+  rpc DeleteConversation(DeleteConversationRequest) returns (CommonResponse);
+  // 对话 MCP 列表
+  rpc ListConversationMCP(ListConversationMCPRequest) returns (ListConversationMCPResponse);
+  // 对话添加 MCP
+  rpc AddConversationMCP(AddConversationMCPRequest) returns (CommonResponse);
+  // 对话移除 MCP
+  rpc RemoveConversationMCP(RemoveConversationMCPRequest) returns (CommonResponse);
+}
+
+service TaskService {
+  // 获取任务详情
+  rpc GetTaskDetail(GetTaskDetailRequest) returns (GetTaskDetailResponse);
+  // 停止任务（工作流任务会级联停止所有子任务）
+  rpc StopTask(StopTaskRequest) returns (CommonResponse);
+}
+
+service MCPService {
+  // MCP 服务器列表
+  rpc ListServers(ListMCPServersRequest) returns (ListMCPServersResponse);
+  // MCP 服务器详情
+  rpc GetServerDetail(GetMCPServerDetailRequest) returns (GetMCPServerDetailResponse);
+  // 创建 MCP 服务器
+  rpc CreateServer(CreateMCPServerRequest) returns (CreateMCPServerResponse);
+  // 更新 MCP 服务器
+  rpc UpdateServer(UpdateMCPServerRequest) returns (UpdateMCPServerResponse);
+  // 删除 MCP 服务器
+  rpc DeleteServer(DeleteMCPServerRequest) returns (CommonResponse);
+  // 测试 MCP 连接
+  rpc TestServer(TestMCPServerRequest) returns (TestMCPServerResponse);
+}

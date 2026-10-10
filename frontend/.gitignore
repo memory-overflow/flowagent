@@ -1,0 +1,17 @@
+# Vite dev/restart 快照（监听 vite.config.ts 时每次重启/改动都生成）
+vite.config.ts.timestamp-*.mjs
+
+# TypeScript 增量编译缓存
+tsconfig.tsbuildinfo
+
+# 依赖与构建产物
+node_modules/
+dist/
+
+# 编辑器
+.vscode/
+.idea/
+
+# 本地环境
+.env.local
+.env.*.local

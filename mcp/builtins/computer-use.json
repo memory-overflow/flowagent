@@ -1,0 +1,13 @@
+{
+  "key": "computer-use",
+  "name": "computer-use",
+  "description": "桌面自动化 MCP（@zavora-ai/computer-use-mcp，MIT）。控制宿主机桌面：发现应用、读界面（截图/可访问性树）、点击/输入/拖拽/快捷键、应用脚本（macOS AppleScript/JXA、Windows PowerShell）。默认暴露 70 个工具，可设 COMPUTER_USE_PROFILE=core 缩小。⚠️ 会直接操作真实桌面，请谨慎启用；macOS 需授「辅助功能 + 屏幕录制」权限，要求 Node 20+。",
+  "transport": "stdio",
+  "command": "npx",
+  "args": [
+    "-y",
+    "@zavora-ai/computer-use-mcp"
+  ],
+  "env": {},
+  "description_en": "Desktop automation MCP (@zavora-ai/computer-use-mcp, MIT). Controls the host desktop: discover apps, read UI (screenshots/accessibility tree), click/type/drag/shortcuts, and app scripting (macOS AppleScript/JXA, Windows UIA). Runs with the current process privileges — review before enabling."
+}
