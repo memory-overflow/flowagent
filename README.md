@@ -12,6 +12,7 @@ A conversation-driven workflow orchestration framework — turn natural-language
 - [Two ways to use](#two-ways-to-use)
 - [API Overview](#api-overview)
 - [Directory Structure](#directory-structure)
+- [Star History](#star-history)
 - [License](#license)
 
 ## Quick Start
@@ -152,6 +153,10 @@ flowagent/
 ├── config/            # Config examples
 └── docs/              # Docs
 ```
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=memory-overflow/flowagent&type=Date)](https://star-history.com/#memory-overflow/flowagent&Date)
 
 ## License
 

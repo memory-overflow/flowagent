@@ -12,6 +12,7 @@ flowagent 是一个对话驱动的全局工作流编排框架：把自然语言�
 - [两种使用方式](#两种使用方式)
 - [API 概览](#api-概览)
 - [目录结构](#目录结构)
+- [Star History](#star-history)
 - [License](#license)
 
 ## Quick Start
@@ -152,6 +153,10 @@ flowagent/
 ├── config/            # 配置示例（example）
 └── docs/              # 文档
 ```
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=memory-overflow/flowagent&type=Date)](https://star-history.com/#memory-overflow/flowagent&Date)
 
 ## License
 
