@@ -18,7 +18,7 @@ echo === flowagent dependency installer ===
 
 REM --- 1. Go ---
 echo.
-echo [1/6] Check Go ^(1.25+ required^)
+echo [1/7] Check Go ^(1.25+ required^)
 where go >nul 2>nul
 if %errorlevel%==0 (
     echo   [OK] Go found
@@ -29,7 +29,7 @@ if %errorlevel%==0 (
 
 REM --- 2. Node.js ---
 echo.
-echo [2/6] Check Node.js ^(18+ required^)
+echo [2/7] Check Node.js ^(18+ required^)
 where node >nul 2>nul
 if %errorlevel%==0 (
     echo   [OK] Node.js found
@@ -40,7 +40,7 @@ if %errorlevel%==0 (
 
 REM --- 3. Python ---
 echo.
-echo [3/6] Check Python ^(3.10+ required^)
+echo [3/7] Check Python ^(3.10+ required^)
 where python >nul 2>nul
 if %errorlevel%==0 (
     echo   [OK] Python found
