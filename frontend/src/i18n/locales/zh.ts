@@ -71,6 +71,11 @@ export const zh = {
     collapseSidebar: '收起侧边栏',
     expandSidebar: '展开侧边栏',
     deleteConfirm: '确定删除该对话？此操作不可恢复。',
+    restartBackend: '重启后端',
+    restartConfirm: '确定重启后端服务？进行中的任务会被中断。',
+    restartDone: '后端已重启完成。',
+    restartTimeout: '等待后端恢复超时，请检查启动终端的日志。',
+    restartFailed: '重启请求失败：{msg}（supervisor 未在运行？）',
   },
 
   // ---- 欢迎页 ----

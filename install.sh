@@ -81,6 +81,7 @@ step "5. 编译后端（bin/agent-server + bin/agent-scheduler）"
 mkdir -p bin
 go build -trimpath -o bin/agent-server ./cmd/server && ok "bin/agent-server"
 go build -trimpath -o bin/agent-scheduler ./cmd/scheduler && ok "bin/agent-scheduler"
+go build -trimpath -o bin/agent-supervisor ./cmd/supervisor && ok "bin/agent-supervisor"
 
 # ── 6. 前端依赖 ──
 step "6. 安装前端依赖（frontend/node_modules）"

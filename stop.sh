@@ -49,7 +49,11 @@ stop_by_cwd() {
 echo "=== flowagent 停止 ==="
 echo "项目目录: $ROOT"
 
-# 后端两个进程：cwd = 项目根
+# 先停 supervisor：它收到信号会顺带 kill 两个子进程；若先停子进程，
+# supervisor 的托管循环会把它们再拉起来，永远停不干净。
+stop_by_cwd agent-supervisor "$ROOT" "agent-supervisor"
+sleep 1
+# 兜底停两个子进程（覆盖 supervisor 未运行、直启的场景）
 stop_by_cwd agent-server "$ROOT" "agent-server"
 stop_by_cwd agent-scheduler "$ROOT" "agent-scheduler"
 

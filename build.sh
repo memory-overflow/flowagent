@@ -48,6 +48,9 @@ go build -trimpath -o "${BIN_DIR}/agent-server" ./cmd/server
 echo "  -> bin/agent-scheduler"
 go build -trimpath -o "${BIN_DIR}/agent-scheduler" ./cmd/scheduler
 
+echo "  -> bin/agent-supervisor"
+go build -trimpath -o "${BIN_DIR}/agent-supervisor" ./cmd/supervisor
+
 if ${BUILD_FRONTEND}; then
   echo "==> 编译前端 ..."
   (cd "${FRONTEND_DIR}" && npm run build)

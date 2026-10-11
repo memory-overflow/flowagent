@@ -31,6 +31,8 @@ export default function Sidebar() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem('flowagent.sidebar-collapsed') === 'true'; } catch { return false; }
   });
+  // 逃生重启进行中：按钮转为 ⏳ 并防重复点击
+  const [restarting, setRestarting] = useState(false);
 
   const toggleCollapsed = useCallback(() => {
     setSidebarCollapsed((prev) => {
@@ -97,6 +99,38 @@ export default function Sidebar() {
       fetchList();
     }
   }, [currentNav]);
+
+  // 逃生入口：直连 supervisor（127.0.0.1:9090）强制重启后端，
+  // 不经过可能已卡死的 server(:8080)。触发后轮询 supervisor 健康，
+  // 直到两个子进程都被拉起，再刷新页面回到可用状态。
+  const handleRestart = async () => {
+    if (restarting) return;
+    if (!confirm(t('nav.restartConfirm'))) return;
+    setRestarting(true);
+    try {
+      const res = await fetch('http://127.0.0.1:9090/restart', { method: 'POST' });
+      if (!res.ok && res.status !== 202) throw new Error(`HTTP ${res.status}`);
+      const deadline = Date.now() + 30_000;
+      let up = false;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 1500));
+        try {
+          const h = await fetch('http://127.0.0.1:9090/health');
+          if ((await h.json())?.data?.all_up) { up = true; break; }
+        } catch { /* 重启窗口期 supervisor/子进程短暂不可达属正常，继续等 */ }
+      }
+      if (up) {
+        alert(t('nav.restartDone'));
+        window.location.reload();
+      } else {
+        alert(t('nav.restartTimeout'));
+      }
+    } catch (e: any) {
+      alert(t('nav.restartFailed', { msg: e.message }));
+    } finally {
+      setRestarting(false);
+    }
+  };
 
   const handleNew = async () => {
     try {
@@ -182,18 +216,26 @@ export default function Sidebar() {
             <span className="nav-rail-label">{t(`nav.${item.key}`)}</span>
           </button>
         ))}
+        {/* 底部：逃生重启按钮（常驻）+ 折叠态的展开按钮 */}
+        <div className="nav-rail-spacer" />
         {sidebarCollapsed && (
-          <>
-            <div className="nav-rail-spacer" />
-            <button
-              className="nav-rail-toggle"
-              onClick={toggleCollapsed}
-              title={t('nav.expandSidebar')}
-            >
-              ›
-            </button>
-          </>
+          <button
+            className="nav-rail-toggle"
+            onClick={toggleCollapsed}
+            title={t('nav.expandSidebar')}
+          >
+            ›
+          </button>
         )}
+        <button
+          className="nav-rail-item"
+          onClick={handleRestart}
+          disabled={restarting}
+          title={t('nav.restartConfirm')}
+        >
+          <span className="nav-rail-icon">{restarting ? '⏳' : '🔄'}</span>
+          <span className="nav-rail-label">{t('nav.restartBackend')}</span>
+        </button>
       </nav>
 
       {/* 右侧内容区：对话列表 / MCP 页面内的辅助列表 */}

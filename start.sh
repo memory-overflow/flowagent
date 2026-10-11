@@ -2,8 +2,9 @@
 # ============================================================================
 # flowagent 一键启动（Linux / macOS）
 #
-# 用途：一条命令拉起三个进程 ——
-#   agent-server（HTTP API） + agent-scheduler（调度器） + 前端（vite dev）
+# 用途：一条命令拉起后端与前端 ——
+#   agent-supervisor 托管 server + scheduler（异常退出自动重启，并提供
+#   127.0.0.1:9090 逃生重启端点，供前端「重启后端」按钮直连）+ 前端（vite dev）。
 #   Ctrl+C 会同时停掉全部进程。
 #
 # 用法：
@@ -36,11 +37,12 @@ if [ ! -f config/config.yaml ]; then
 fi
 
 # ── 3. 编译后端（二进制缺失时） ──
-if [ ! -x bin/agent-server ] || [ ! -x bin/agent-scheduler ]; then
+if [ ! -x bin/agent-server ] || [ ! -x bin/agent-scheduler ] || [ ! -x bin/agent-supervisor ]; then
   echo "编译后端..."
   mkdir -p bin
   go build -trimpath -o bin/agent-server ./cmd/server || { fail "编译 agent-server 失败"; exit 1; }
   go build -trimpath -o bin/agent-scheduler ./cmd/scheduler || { fail "编译 agent-scheduler 失败"; exit 1; }
+  go build -trimpath -o bin/agent-supervisor ./cmd/supervisor || { fail "编译 agent-supervisor 失败"; exit 1; }
 fi
 
 # ── 4. 前端依赖 ──
@@ -59,18 +61,14 @@ cleanup() {
 }
 trap cleanup INT TERM
 
-./bin/agent-server -config config/config.yaml &
+./bin/agent-supervisor -config config/config.yaml &
 PIDS="$PIDS $!"
-ok "agent-server 启动 (pid $!)"
-
-./bin/agent-scheduler -config config/config.yaml &
-PIDS="$PIDS $!"
-ok "agent-scheduler 启动 (pid $!)"
+ok "agent-supervisor 启动 (pid $!) —— 托管 server/scheduler，逃生端点 :9090"
 
 (cd frontend && npm run dev) &
 PIDS="$PIDS $!"
 ok "前端启动 (pid $!) —— 地址见上方 vite 输出"
 
 echo ""
-echo "三个进程已启动，按 Ctrl+C 停止全部。"
+echo "两个进程已启动，按 Ctrl+C 停止全部。"
 wait

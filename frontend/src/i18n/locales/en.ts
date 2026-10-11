@@ -66,6 +66,11 @@ export const en = {
     collapseSidebar: 'Collapse sidebar',
     expandSidebar: 'Expand sidebar',
     deleteConfirm: 'Delete this conversation? This cannot be undone.',
+    restartBackend: 'Restart backend',
+    restartConfirm: 'Restart backend services? Running tasks will be interrupted.',
+    restartDone: 'Backend restarted.',
+    restartTimeout: 'Timed out waiting for backend recovery. Check the terminal running start.sh.',
+    restartFailed: 'Restart request failed: {msg} (is supervisor running?)',
   },
 
   welcome: {
