@@ -64,6 +64,7 @@ data
 __pycache__/
 .python/
 .venv/
+venv/
 
 # 用户自定义 skills（本地上传，不进仓库）
 skills/user/
