@@ -68,5 +68,10 @@ venv/
 
 # 用户自定义 skills（本地上传，不进仓库）
 skills/user/
-# go build 无 -o 时落在仓库根的包二进制
+# go build 无 -o 时落在仓库根的包二进制（cmd/server、cmd/scheduler、cmd/supervisor）
+/server
+/scheduler
+/agent-server
+/agent-scheduler
+/agent-supervisor
 /supervisor

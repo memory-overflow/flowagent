@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -155,10 +156,16 @@ func startPprof(addr string) {
 
 // seedDefaultModel 首次启动时把 config.yaml 的 llm 块落成一条默认模型配置。
 //
-// 只在 model_config 表为空时执行（幂等）：一旦用户在前端建过模型就不再覆盖，
-// 避免重启把用户配置冲掉。默认模型 is_default=true、enabled=true，供
-// scheduler 的 Resolver 在「对话未显式指定模型」时回落使用。
+// 只在「config.yaml 配置了 llm 块（base_url + model 非空）且 model_config 表
+// 为空」时执行：llm 块缺失时 seed 出来的是一条协议回落 gemini、URL/Key/模型
+// 全空的空壳，既不能调用又误导用户，不如不 seed，让新用户从首次配置引导
+// 干净开始。默认模型 is_default=true、enabled=true，供 scheduler 的 Resolver
+// 在「对话未显式指定模型」时回落使用。
 func seedDefaultModel(cfg *config.Config) error {
+	if strings.TrimSpace(cfg.LLM.BaseURL) == "" || strings.TrimSpace(cfg.LLM.Model) == "" {
+		return nil
+	}
+
 	modelDAO := &dao.ModelConfigDAO{}
 	n, err := modelDAO.Count(context.Background())
 	if err != nil {
