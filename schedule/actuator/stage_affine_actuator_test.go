@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	framework "github.com/memory-overflow/light-task-scheduler"
 	"github.com/memory-overflow/flowagent/model"
+	framework "github.com/memory-overflow/light-task-scheduler"
 )
 
 // fakeInner 模拟 framework 的 function_actuator 行为：

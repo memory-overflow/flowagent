@@ -17,18 +17,18 @@ import (
 
 // BuiltinManifest 一个内置 Skill 的清单
 type BuiltinManifest struct {
-	Key         string            `json:"key"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 	// NameEn/DescriptionEn 英文展示名与描述（仅前端英文界面用；给 LLM 的
 	// skill 注入始终用中文 Name/Description）。i-have-adhd / shell 等名字
 	// 本身是技术标识，没有 name_en，展示时回落原文。
-	NameEn        string          `json:"name_en,omitempty"`
-	DescriptionEn string          `json:"description_en,omitempty"`
-	Type          model.SkillType `json:"type"` // 1=prompt 2=command
-	Content       string          `json:"content"`
-	Command       string          `json:"command,omitempty"`
-	Args          []string        `json:"args,omitempty"`
+	NameEn        string            `json:"name_en,omitempty"`
+	DescriptionEn string            `json:"description_en,omitempty"`
+	Type          model.SkillType   `json:"type"` // 1=prompt 2=command
+	Content       string            `json:"content"`
+	Command       string            `json:"command,omitempty"`
+	Args          []string          `json:"args,omitempty"`
 	Env           map[string]string `json:"env,omitempty"`
 }
 

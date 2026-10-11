@@ -266,9 +266,9 @@ func buildSkillItemLocalized(c *gin.Context, s *model.Skill) *SkillItem {
 
 // BuiltinSkillItem 前端展示用的内置 Skill 条目
 type BuiltinSkillItem struct {
-	Key         string            `json:"key"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 	// NameDisplay/DescDisplay 按请求语言折算的展示值（en 有翻译用翻译，否则回落中文）
 	NameDisplay string            `json:"name_display"`
 	DescDisplay string            `json:"description_display"`

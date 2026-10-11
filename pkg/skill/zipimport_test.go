@@ -114,12 +114,12 @@ description: 3D 工具技能目录，查名单读 skill-list.md。
 // 子能力清单并入 content，全部文件（含子 SKILL.md）落地同一目录。
 func TestAnalyzeSkillMDCollection(t *testing.T) {
 	zipPath := buildTestZip(t, map[string]string{
-		"3d动画生成/SKILL.md":                       rootSkillMD,
-		"3d动画生成/skill-list.md":                  "名单",
+		"3d动画生成/SKILL.md":                    rootSkillMD,
+		"3d动画生成/skill-list.md":               "名单",
 		"3d动画生成/demo/gen-360/SKILL.md":       skillMD,
 		"3d动画生成/demo/gen-360/scripts/run.py": "print('1')",
-		"3d动画生成/demo/gen-270/SKILL.md":        "---\nname: gen-uv\ndescription: 展开 UV。\n---\n\n# gen_uv\n",
-		"3d动画生成/demo/gen-270/scripts/run.py":  "print('2')",
+		"3d动画生成/demo/gen-270/SKILL.md":       "---\nname: gen-uv\ndescription: 展开 UV。\n---\n\n# gen_uv\n",
+		"3d动画生成/demo/gen-270/scripts/run.py": "print('2')",
 	})
 	items, err := AnalyzeSkillZip(zipPath)
 	if err != nil {

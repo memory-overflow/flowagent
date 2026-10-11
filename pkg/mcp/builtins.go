@@ -17,17 +17,17 @@ import (
 
 // BuiltinManifest 一个内置 MCP 的清单
 type BuiltinManifest struct {
-	Key         string            `json:"key"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 	// DescriptionEn 英文展示描述（仅前端英文界面用；给 LLM 的工具描述始终用中文 Description）。
 	DescriptionEn string            `json:"description_en,omitempty"`
 	Transport     string            `json:"transport"`
-	Command     string            `json:"command,omitempty"`
-	Args        []string          `json:"args,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
-	URL         string            `json:"url,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty"`
+	Command       string            `json:"command,omitempty"`
+	Args          []string          `json:"args,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
+	URL           string            `json:"url,omitempty"`
+	Headers       map[string]string `json:"headers,omitempty"`
 	// Hidden 为 true 时不在「内置 MCP 列表」里展示，也不参与预热。
 	//
 	// 用于标记「能力已内置进代码」的清单（如 fetch → 内置 web_search 抓取、

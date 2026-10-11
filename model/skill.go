@@ -31,21 +31,21 @@ const (
 // Name 用于内置清单按名判重（与 MCP 一致）；Content 是核心指令正文，
 // Command/Args/Env 仅在 type=command 时有意义。
 type Skill struct {
-	ID          string         `gorm:"column:id;size:100;primaryKey" json:"id"`
-	Name        string         `gorm:"column:name;size:255;not null" json:"name"`
-	Description string         `gorm:"column:description;size:1024" json:"description"`
+	ID          string `gorm:"column:id;size:100;primaryKey" json:"id"`
+	Name        string `gorm:"column:name;size:255;not null" json:"name"`
+	Description string `gorm:"column:description;size:1024" json:"description"`
 	// NameEn/DescriptionEn 英文展示名与描述，分工同 MCPServer 的注释：
 	// 中文原文给 LLM 与编辑表单，英文仅用于前端展示，为空回落中文。
-	NameEn        string `gorm:"column:name_en;size:255" json:"name_en,omitempty"`
-	DescriptionEn string `gorm:"column:description_en;size:1024" json:"description_en,omitempty"`
-	Type        SkillType      `gorm:"column:type;not null;default:1" json:"type"`
-	Content     string         `gorm:"column:content;type:longtext" json:"content"` // markdown 指令正文
-	Command     string         `gorm:"column:command;size:512" json:"command,omitempty"`
-	Args        string         `gorm:"column:args;type:text" json:"args,omitempty"` // JSON array
-	Env         string         `gorm:"column:env;type:text" json:"env,omitempty"`   // JSON map
-	CreatedAt   time.Time      `gorm:"column:created_time;not null" json:"created_time"`
-	UpdatedAt   time.Time      `gorm:"column:updated_time;not null;autoUpdateTime" json:"updated_time"`
-	DeletedAt   gorm.DeletedAt `gorm:"column:delete_time;index" json:"-"`
+	NameEn        string         `gorm:"column:name_en;size:255" json:"name_en,omitempty"`
+	DescriptionEn string         `gorm:"column:description_en;size:1024" json:"description_en,omitempty"`
+	Type          SkillType      `gorm:"column:type;not null;default:1" json:"type"`
+	Content       string         `gorm:"column:content;type:longtext" json:"content"` // markdown 指令正文
+	Command       string         `gorm:"column:command;size:512" json:"command,omitempty"`
+	Args          string         `gorm:"column:args;type:text" json:"args,omitempty"` // JSON array
+	Env           string         `gorm:"column:env;type:text" json:"env,omitempty"`   // JSON map
+	CreatedAt     time.Time      `gorm:"column:created_time;not null" json:"created_time"`
+	UpdatedAt     time.Time      `gorm:"column:updated_time;not null;autoUpdateTime" json:"updated_time"`
+	DeletedAt     gorm.DeletedAt `gorm:"column:delete_time;index" json:"-"`
 }
 
 func (Skill) TableName() string { return "skill" }
