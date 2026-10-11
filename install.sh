@@ -110,7 +110,7 @@ step "8. 安装 skills 运行时依赖（pdfkit-py / minimax-xlsx / browser-use�
 if [ -f skills/setup.sh ]; then
   # 子安装器（skills/setup.sh）有自己的 0-N 步骤编号，整体缩进输出，
   # 视觉上明确归属本步骤，避免与外层 1-8 编号混淆。pipefail 保退出码。
-  bash skills/setup.sh 2>&1 | awk '{printf "    %s\n", $0}'
+  bash skills/setup.sh 2>&1 | while IFS= read -r line; do printf '    %s\n' "$line"; done
   rc=$?
   if [ "$rc" -ne 0 ]; then
     warn "skills 依赖安装失败（退出码 $rc，详见上方输出）"

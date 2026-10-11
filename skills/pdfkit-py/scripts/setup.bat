@@ -96,7 +96,7 @@ if not exist "!VENV_DIR!" (
 REM --- 3. Install core dependencies ---
 echo.
 echo Installing core Python dependencies...
-"!VPYTHON!" -m pip install -r "!REQ_FILE!" --quiet
+"!VPYTHON!" -m pip install -r "!REQ_FILE!"
 if !errorlevel! NEQ 0 (
     echo [WARN] Some packages may have failed to install, retrying with verbose output...
     "!VPYTHON!" -m pip install -r "!REQ_FILE!"
@@ -111,7 +111,7 @@ if "!INSTALL_ALL!"=="1" (
     if exist "!REQ_OPT_FILE!" (
         echo.
         echo Installing optional dependencies...
-        "!VPYTHON!" -m pip install -r "!REQ_OPT_FILE!" --quiet
+        "!VPYTHON!" -m pip install -r "!REQ_OPT_FILE!"
         if !errorlevel! NEQ 0 (
             echo [WARN] Some optional packages failed, retrying...
             "!VPYTHON!" -m pip install -r "!REQ_OPT_FILE!"

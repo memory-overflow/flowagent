@@ -155,11 +155,11 @@ fi
 # ── 3. 安装核心依赖 ──────────────────────────────────────────
 echo ""
 echo "Installing core Python dependencies..."
-if ! "$VPYTHON" -m pip install -r "$REQ_FILE" --quiet 2>&1 | grep -v "already satisfied" | tail -5; then
-    echo -e "${YELLOW}!${NC} Some packages may have failed, retrying with verbose output..."
-    if ! "$VPYTHON" -m pip install -r "$REQ_FILE"; then
-        echo -e "${YELLOW}!${NC} Core dependency installation had errors, continuing setup..."
-    fi
+# 不用 --quiet + tail -5：tail 会把输出攒到安装结束才放出，大包
+# （PyMuPDF/numpy/pdfplumber 共几十 MB）下载期间屏幕完全静止，像卡死。
+# 直接透传 pip 的 Collecting/Downloading 实时进度。
+if ! "$VPYTHON" -m pip install -r "$REQ_FILE" --progress-bar on; then
+    echo -e "${YELLOW}!${NC} Core dependency installation had errors, continuing setup..."
 fi
 echo -e "${GREEN}✓${NC} Core dependencies installed"
 
@@ -167,10 +167,7 @@ echo -e "${GREEN}✓${NC} Core dependencies installed"
 if [ "$INSTALL_ALL" = true ] && [ -f "$REQ_OPT_FILE" ]; then
     echo ""
     echo "Installing optional dependencies..."
-    if ! "$VPYTHON" -m pip install -r "$REQ_OPT_FILE" --quiet 2>&1 | grep -v "already satisfied" | tail -5; then
-        echo -e "${YELLOW}!${NC} Some optional packages failed, retrying..."
-        "$VPYTHON" -m pip install -r "$REQ_OPT_FILE" || true
-    fi
+    "$VPYTHON" -m pip install -r "$REQ_OPT_FILE" --progress-bar on || true
     echo -e "${GREEN}✓${NC} Optional dependencies installed"
 fi
 
