@@ -64,6 +64,10 @@ type Context struct {
 	// WorkspaceDir 当前任务的工作区绝对目录（已按任务 key 解析）。
 	// 空表示当前任务没有工作区，文件工具会拒绝执行。
 	WorkspaceDir string
+	// ProjectRoot 项目根绝对路径（= 工作区根的上一级）。
+	// run_command 执行 shell 命令前据此激活项目级 venv（.venv），
+	// 让 python / python3 / pip 指向项目 venv 而非本机环境。空则不激活。
+	ProjectRoot string
 	// ArtifactDir 本任务的产出目录（相对工作区，如 "outputs/wf-ac049a2f/n1_search"）。
 	//
 	// 仅子任务设置（见 model.TaskInputData.ArtifactDir）。write_file 收到
@@ -439,6 +443,19 @@ func resolveCommandTimeout(args map[string]interface{}) time.Duration {
 	return timeout
 }
 
+// venvActivateFor 生成在 shell 命令前注入的 venv 激活片段。
+//
+// projectRoot 为项目根绝对路径，据此定位 <projectRoot>/.venv/bin/activate。
+// 用 shell 条件判断：venv 存在才 source，不存在则静默跳过（&& 短路）。
+// 返回空串表示 projectRoot 为空（不激活）。
+func venvActivateFor(projectRoot string) string {
+	if strings.TrimSpace(projectRoot) == "" {
+		return ""
+	}
+	activate := filepath.Join(projectRoot, ".venv", "bin", "activate")
+	return "[ -f \"" + activate + "\" ] && . \"" + activate + "\"\n"
+}
+
 func runCommandTool() *ToolDef {
 	return &ToolDef{
 		Name: "run_command",
@@ -469,6 +486,11 @@ func runCommandTool() *ToolDef {
 			// 危险删除拦截（复用 skill 的检测逻辑）
 			if reason := skill.DetectDangerousCommand(cmd); reason != "" {
 				return "", fmt.Errorf("命令被安全策略拦截: %s", reason)
+			}
+			// 激活项目级 venv：run_command 的 cwd 是任务工作区，需用项目根
+			// 绝对路径定位 .venv；激活后 python/python3/pip 指向项目 venv。
+			if prefix := venvActivateFor(wc.ProjectRoot); prefix != "" {
+				cmd = prefix + cmd
 			}
 			if err := ensureDir(wc.WorkspaceDir); err != nil {
 				return "", fmt.Errorf("创建工作区目录失败: %w", err)

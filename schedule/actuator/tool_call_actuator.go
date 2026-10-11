@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -537,8 +538,14 @@ func runToolEntry(
 			timeout = workspacepkg.DefaultTimeout
 		}
 		callCtx, cancel := context.WithTimeout(ctx, timeout)
+		// 项目根 = 工作区根的上一级，供内置 run_command 激活项目级 venv。
+		projectRoot := ""
+		if toolCallRegistry.ws != nil {
+			projectRoot = filepath.Dir(toolCallRegistry.ws.Root())
+		}
 		wc := &workspacepkg.Context{
 			WorkspaceDir:     wsDir,
+			ProjectRoot:      projectRoot,
 			ArtifactDir:      artifactDir,
 			VisionAnalyzer:   visionAnalyzer,
 			DeepSearchRunner: deepSearchRunner,
