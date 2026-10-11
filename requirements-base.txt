@@ -1,0 +1,20 @@
+# flowagent 项目级 Python 虚拟环境（.venv）基础库
+# 供内置 shell skill 执行 Python 代码时使用（python 是核心能力）
+# 说明：pdfkit-py 使用自己独立的 venv，不在此列。
+
+# HTTP / 网络
+requests>=2.31.0
+httpx>=0.27.0
+
+# 解析
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+PyYAML>=6.0.1
+
+# 数据处理 / 表格
+pandas>=2.2.0
+openpyxl>=3.1.0
+
+# 常用工具
+python-dotenv>=1.0.1
+python-dateutil>=2.9.0

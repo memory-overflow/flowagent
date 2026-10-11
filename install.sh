@@ -3,10 +3,10 @@
 # flowagent 依赖安装脚本（Linux / macOS）
 #
 # 用途：一次性装好运行 flowagent 所需的全部依赖——
-#   1) Go（检测，缺失给指引）          4) 生成默认配置 config/config.yaml
-#   2) Node.js（检测，缺失给指引）     5) 编译后端到 bin/
-#   3) Python（检测，缺失给指引）      6) 前端 npm install
-#                                      7) skills 运行时依赖（复用 skills/setup.sh）
+#   1) Go（检测，缺失给指引）          5) 编译后端到 bin/
+#   2) Node.js（检测，缺失给指引）     6) 前端 npm install
+#   3) Python（检测，缺失给指引）      7) 项目级 venv + 基础库
+#   4) 生成默认配置 config/config.yaml  8) skills 运行时依赖（pdfkit-py 独立）
 #
 # 用法：
 #   bash install.sh
@@ -86,8 +86,22 @@ go build -trimpath -o bin/agent-scheduler ./cmd/scheduler && ok "bin/agent-sched
 step "6. 安装前端依赖（frontend/node_modules）"
 (cd frontend && npm install --no-audit --no-fund)
 
-# ── 7. skills 运行时依赖 ──
-step "7. 安装 skills 运行时依赖（pdfkit-py / minimax-xlsx / browser-use）"
+# ── 7. 项目级 Python 虚拟环境 ──
+step "7. 项目级 Python 虚拟环境（.venv + 基础库）"
+if has python3; then
+  if [ ! -x .venv/bin/python3 ]; then
+    python3 -m venv .venv && ok ".venv 已创建"
+  else
+    ok ".venv 已存在"
+  fi
+  [ -x .venv/bin/python ] || ln -s python3 .venv/bin/python
+  .venv/bin/pip install -r requirements-base.txt --quiet && ok "基础库已安装"
+else
+  warn "未找到 python3，跳过项目级 venv（pdfkit-py 仍会自装独立 Python）"
+fi
+
+# ── 8. skills 运行时依赖 ──
+step "8. 安装 skills 运行时依赖（pdfkit-py / minimax-xlsx / browser-use）"
 if [ -f skills/setup.sh ]; then
   bash skills/setup.sh
 else

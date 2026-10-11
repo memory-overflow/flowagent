@@ -3,10 +3,10 @@ REM ============================================================================
 REM flowagent dependency installer (Windows)
 REM
 REM Installs everything needed to run flowagent:
-REM   1) Go (check, guide if missing)        4) generate default config
-REM   2) Node.js (check, guide if missing)   5) build backend to bin\
-REM   3) Python (check, guide if missing)    6) frontend npm install
-REM                                          7) skills runtime deps
+REM   1) Go (check, guide if missing)        5) build backend to bin\
+REM   2) Node.js (check, guide if missing)   6) frontend npm install
+REM   3) Python (check, guide if missing)    7) project venv + base libs
+REM   4) generate default config             8) skills runtime deps
 REM
 REM Usage: install.bat
 REM Idempotent: safe to re-run.
@@ -81,9 +81,30 @@ cd frontend
 call npm install --no-audit --no-fund
 cd ..
 
-REM --- 7. Skills runtime deps ---
+REM --- 7. Project venv ---
 echo.
-echo [7/7] Install skills runtime dependencies
+echo [7/8] Create project venv ^(.venv + base libs^)
+where python >nul 2>nul
+if %errorlevel%==0 (
+    if not exist .venv\Scripts\python.exe (
+        python -m venv .venv
+        echo   [OK] .venv created
+    ) else (
+        echo   [OK] .venv already exists
+    )
+    if not exist .venv\Scripts\python3.exe (
+        copy .venv\Scripts\python.exe .venv\Scripts\python3.exe >nul
+        echo   [OK] python3.exe created
+    )
+    .venv\Scripts\pip.exe install -r requirements-base.txt --quiet
+    echo   [OK] base libs installed
+) else (
+    echo   [WARN] Python not found, skip project venv
+)
+
+REM --- 8. Skills runtime deps ---
+echo.
+echo [8/8] Install skills runtime dependencies
 if exist skills\pdfkit-py\scripts\setup.bat (
     call skills\pdfkit-py\scripts\setup.bat
 ) else (
