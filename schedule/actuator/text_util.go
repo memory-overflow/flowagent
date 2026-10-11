@@ -56,7 +56,7 @@ func renderUserInput(in *model.TaskInputData, wsDir string) string {
 func renderInputFileManifest(files []model.FileInfo, wsDir string) string {
 	var b strings.Builder
 	b.WriteString("## 用户附件\n\n")
-	b.WriteString("用户随本次输入提供了以下文件，已存放在你的工作区内（路径为相对工作区的路径）：\n\n")
+	b.WriteString("用户随本次输入提供了以下文件，已存放在你的工作区内。每个文件同时给出「相对工作区的路径」与「绝对路径」，两者都可直接用于 read_file / write_file / run_command：\n\n")
 
 	var (
 		hasImage    bool
@@ -80,6 +80,11 @@ func renderInputFileManifest(files []model.FileInfo, wsDir string) string {
 			path = f.Name
 		}
 		fmt.Fprintf(&b, "%d. `%s`\n", i+1, path)
+		// 额外给绝对路径：弱模型对「相对工作区」这个抽象易混淆，容易自己脑补成
+		// workspace/xxx 猜错（缺 chat_id 层），直接给可照抄的绝对路径省掉试错。
+		if wsDir != "" {
+			fmt.Fprintf(&b, "   - 绝对路径：`%s`\n", filepath.Join(wsDir, path))
+		}
 		fmt.Fprintf(&b, "   - 文件名：%s\n", f.Name)
 		fmt.Fprintf(&b, "   - 类型：%s", fileKindLabel(f))
 		if f.MimeType != "" {
@@ -135,7 +140,7 @@ func renderInputFileManifest(files []model.FileInfo, wsDir string) string {
 		b.WriteString("- 图片文件：不要用 read_file 直接读取（会得到乱码）。图片的具体处理方式" +
 			"（能否理解图像、能否提取图中文字）请严格遵循系统提示中的「图片理解」策略。\n")
 	}
-	b.WriteString("- 所有路径都是相对工作区的，可直接传给 read_file / write_file / run_command。\n")
+	b.WriteString("- 相对路径与绝对路径指向同一文件，任选其一传给 read_file / write_file / run_command 均可。\n")
 
 	return b.String()
 }
