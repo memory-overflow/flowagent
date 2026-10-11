@@ -48,6 +48,18 @@ start.bat
 
 会拉起 agent-server + agent-scheduler + 前端。打开前端地址即可对话、查看 DAG 工作流。
 
+### 3. 停止
+
+```bash
+# Linux / macOS
+bash stop.sh
+
+# Windows
+stop.bat
+```
+
+停止上面启动的服务——只停当前项目目录下的进程，不会误伤其他目录启动的实例。
+
 ## Why flowagent
 
 1. **好用好接入的开源 agent 框架缺失**。目前没有一个好用的开源 agent 框架可供企业或个人直接接入——要么自己从零造轮子，要么只能绑定某家云厂商的云上 agent。flowagent 想做的，就是一个**好接入、功能完善的开源 agent 框架**。

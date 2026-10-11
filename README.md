@@ -48,6 +48,18 @@ start.bat
 
 This launches agent-server + agent-scheduler + the frontend. Open the frontend URL to chat and inspect DAG workflows.
 
+### 3. Stop
+
+```bash
+# Linux / macOS
+bash stop.sh
+
+# Windows
+stop.bat
+```
+
+This stops the services started above — only the processes under this project directory, leaving instances elsewhere untouched.
+
 ## Why flowagent
 
 1. **An easy-to-integrate, feature-complete open-source agent framework is missing.** Today there is no great open-source agent framework that enterprises or individuals can plug in directly — you either reinvent the wheel from scratch, or lock yourself into a cloud provider's hosted agent. flowagent aims to be exactly that: easy to integrate and feature-complete.

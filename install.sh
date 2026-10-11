@@ -95,7 +95,11 @@ if has python3; then
     ok ".venv 已存在"
   fi
   [ -x .venv/bin/python ] || ln -s python3 .venv/bin/python
-  .venv/bin/pip install -r requirements-base.txt --quiet && ok "基础库已安装"
+  echo "安装基础库（实时显示进度）..."
+  .venv/bin/pip install -r requirements-base.txt
+  echo ""
+  ok "基础库安装完成，已安装的库："
+  .venv/bin/pip list --format=freeze 2>/dev/null | grep -iE '^(requests|httpx|beautifulsoup4|lxml|PyYAML|pandas|openpyxl|python-dotenv|python-dateutil)==' | sed 's/^/    /'
 else
   warn "未找到 python3，跳过项目级 venv（pdfkit-py 仍会自装独立 Python）"
 fi

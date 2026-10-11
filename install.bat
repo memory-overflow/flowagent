@@ -96,8 +96,9 @@ if %errorlevel%==0 (
         copy .venv\Scripts\python.exe .venv\Scripts\python3.exe >nul
         echo   [OK] python3.exe created
     )
-    .venv\Scripts\pip.exe install -r requirements-base.txt --quiet
+    .venv\Scripts\pip.exe install -r requirements-base.txt
     echo   [OK] base libs installed
+    .venv\Scripts\pip.exe list --format=freeze 2>nul | findstr /I /B "requests== httpx== beautifulsoup4== lxml== PyYAML== pandas== openpyxl== python-dotenv== python-dateutil=="
 ) else (
     echo   [WARN] Python not found, skip project venv
 )
