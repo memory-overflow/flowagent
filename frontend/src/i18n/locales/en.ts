@@ -71,6 +71,7 @@ export const en = {
     restartDone: 'Backend restarted.',
     restartTimeout: 'Timed out waiting for backend recovery. Check the terminal running start.sh.',
     restartFailed: 'Restart request failed: {msg} (is supervisor running?)',
+    restartHint: 'For backend errors, crashes or hangs. Force-restarts the backend; running tasks will be interrupted.',
   },
 
   welcome: {

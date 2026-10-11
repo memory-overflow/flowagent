@@ -76,6 +76,7 @@ export const zh = {
     restartDone: '后端已重启完成。',
     restartTimeout: '等待后端恢复超时，请检查启动终端的日志。',
     restartFailed: '重启请求失败：{msg}（supervisor 未在运行？）',
+    restartHint: '后端服务异常报错、异常退出或系统卡住时使用。强制重启后端，进行中的任务会被中断。',
   },
 
   // ---- 欢迎页 ----

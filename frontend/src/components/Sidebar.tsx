@@ -231,7 +231,7 @@ export default function Sidebar() {
           className="nav-rail-item"
           onClick={handleRestart}
           disabled={restarting}
-          title={t('nav.restartConfirm')}
+          title={t('nav.restartHint')}
         >
           <span className="nav-rail-icon">{restarting ? '⏳' : '🔄'}</span>
           <span className="nav-rail-label">{t('nav.restartBackend')}</span>

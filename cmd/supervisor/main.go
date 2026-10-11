@@ -139,6 +139,24 @@ func (m *managed) supervise(ctx context.Context) {
 // 管理端点
 // ============================================================
 
+// corsMiddleware 为管理端点加 CORS 头。
+//
+// 前端跑在独立端口（vite dev 默认 3000），与 supervisor（:9090）跨源，
+// 浏览器会拦截无 CORS 头的响应，前端 fetch 表现为 "Failed to fetch"。
+// 管理端点只提供本机重启/健康探测能力，Allow-Origin 用 * 即可。
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // registerHandlers 注册管理端点。
 //
 // POST /restart：前端逃生入口。kill 两个子进程，supervise 循环随后自动
@@ -203,7 +221,7 @@ func main() {
 	// 管理端点：只绑 loopback（默认），逃生入口不对外网暴露。
 	mux := http.NewServeMux()
 	registerHandlers(mux, procs)
-	srv := &http.Server{Addr: *addr, Handler: mux}
+	srv := &http.Server{Addr: *addr, Handler: corsMiddleware(mux)}
 	go func() {
 		log.Printf("[supervisor] 管理端点已就绪: http://%s（POST /restart = 逃生重启）", *addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
