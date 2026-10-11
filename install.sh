@@ -3,9 +3,10 @@
 # flowagent 依赖安装脚本（Linux / macOS）
 #
 # 用途：一次性装好运行 flowagent 所需的全部依赖——
-#   1) Go（检测，缺失给指引）          4) 编译后端到 bin/
-#   2) Node.js（检测，缺失给指引）     5) 前端 npm install
-#   3) Python（检测，缺失给指引）      6) skills 运行时依赖（复用 skills/setup.sh）
+#   1) Go（检测，缺失给指引）          4) 生成默认配置 config/config.yaml
+#   2) Node.js（检测，缺失给指引）     5) 编译后端到 bin/
+#   3) Python（检测，缺失给指引）      6) 前端 npm install
+#                                      7) skills 运行时依赖（复用 skills/setup.sh）
 #
 # 用法：
 #   bash install.sh
@@ -66,18 +67,27 @@ if [ "$MISSING" = 1 ]; then
   exit 1
 fi
 
-# ── 4. 编译后端 ──
-step "4. 编译后端（bin/agent-server + bin/agent-scheduler）"
+# ── 4. 生成默认配置 ──
+step "4. 生成默认配置（config/config.yaml）"
+if [ -f config/config.yaml ]; then
+  ok "config/config.yaml 已存在，跳过"
+else
+  cp config/config.example.yaml config/config.yaml
+  ok "已从 config.example.yaml 生成 config/config.yaml（默认 sqlite）"
+fi
+
+# ── 5. 编译后端 ──
+step "5. 编译后端（bin/agent-server + bin/agent-scheduler）"
 mkdir -p bin
 go build -trimpath -o bin/agent-server ./cmd/server && ok "bin/agent-server"
 go build -trimpath -o bin/agent-scheduler ./cmd/scheduler && ok "bin/agent-scheduler"
 
-# ── 5. 前端依赖 ──
-step "5. 安装前端依赖（frontend/node_modules）"
+# ── 6. 前端依赖 ──
+step "6. 安装前端依赖（frontend/node_modules）"
 (cd frontend && npm install --no-audit --no-fund)
 
-# ── 6. skills 运行时依赖 ──
-step "6. 安装 skills 运行时依赖（pdfkit-py / minimax-xlsx / browser-use）"
+# ── 7. skills 运行时依赖 ──
+step "7. 安装 skills 运行时依赖（pdfkit-py / minimax-xlsx / browser-use）"
 if [ -f skills/setup.sh ]; then
   bash skills/setup.sh
 else

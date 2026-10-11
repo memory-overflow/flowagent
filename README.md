@@ -23,7 +23,6 @@ Run flowagent with its built-in web UI:
 
 - Go 1.25+
 - Node.js 18+
-- MySQL or SQLite (SQLite is recommended for zero-dependency startup)
 
 ### 1. Install dependencies
 
@@ -35,18 +34,9 @@ bash install.sh
 install.bat
 ```
 
-This checks Go / Node.js / Python, builds the backend, installs frontend dependencies, and sets up skill runtime dependencies.
+This checks Go / Node.js / Python, generates a default `config/config.yaml` (SQLite, zero-dependency), builds the backend, installs frontend dependencies, and sets up skill runtime dependencies.
 
-### 2. Configure
-
-```bash
-cp config/config.example.yaml config/config.yaml
-# Edit config/config.yaml: set database and llm (provider / base_url / api_key / model)
-```
-
-> The database driver can be hot-switched in the frontend "System Settings" (writes `config/db_config.json`). SQLite requires no external dependencies.
-
-### 3. Start
+### 2. Start
 
 ```bash
 # Linux / macOS

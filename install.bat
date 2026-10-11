@@ -3,9 +3,10 @@ REM ============================================================================
 REM flowagent dependency installer (Windows)
 REM
 REM Installs everything needed to run flowagent:
-REM   1) Go (check, guide if missing)        4) build backend to bin\
-REM   2) Node.js (check, guide if missing)   5) frontend npm install
-REM   3) Python (check, guide if missing)    6) skills runtime deps
+REM   1) Go (check, guide if missing)        4) generate default config
+REM   2) Node.js (check, guide if missing)   5) build backend to bin\
+REM   3) Python (check, guide if missing)    6) frontend npm install
+REM                                          7) skills runtime deps
 REM
 REM Usage: install.bat
 REM Idempotent: safe to re-run.
@@ -47,9 +48,19 @@ if %errorlevel%==0 (
     echo   [WARN] Python not found - pdfkit-py will download its own runtime, continue.
 )
 
-REM --- 4. Build backend ---
+REM --- 4. Generate default config ---
 echo.
-echo [4/6] Build backend
+echo [4/7] Generate default config
+if not exist config\config.yaml (
+    copy config\config.example.yaml config\config.yaml >nul
+    echo   [OK] config\config.yaml created from example ^(default sqlite^)
+) else (
+    echo   [OK] config\config.yaml already exists, skipped
+)
+
+REM --- 5. Build backend ---
+echo.
+echo [5/7] Build backend
 if not exist bin mkdir bin
 go build -trimpath -o bin\agent-server.exe ./cmd/server
 if %errorlevel% neq 0 (
@@ -63,16 +74,16 @@ if %errorlevel% neq 0 (
 )
 echo   [OK] backend built
 
-REM --- 5. Frontend deps ---
+REM --- 6. Frontend deps ---
 echo.
-echo [5/6] Install frontend dependencies
+echo [6/7] Install frontend dependencies
 cd frontend
 call npm install --no-audit --no-fund
 cd ..
 
-REM --- 6. Skills runtime deps ---
+REM --- 7. Skills runtime deps ---
 echo.
-echo [6/6] Install skills runtime dependencies
+echo [7/7] Install skills runtime dependencies
 if exist skills\pdfkit-py\scripts\setup.bat (
     call skills\pdfkit-py\scripts\setup.bat
 ) else (

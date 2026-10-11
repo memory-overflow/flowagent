@@ -7,13 +7,15 @@ server:
   mode: release        # gin 运行模式: debug / release / test
 
 database:
-  driver: mysql        # 数据库驱动: mysql / sqlite（默认 mysql）
-  host: 127.0.0.1      # MySQL 地址
-  port: 3306           # MySQL 端口
-  user: root           # 用户名
-  password: "your_password"   # 密码（请勿提交真实密码）
-  dbname: flowagent    # 数据库名
-  charset: utf8mb4     # 字符集
+  driver: sqlite       # 数据库驱动: sqlite（零依赖，开箱即用）/ mysql
+  path: "./data/flowagent.db"   # sqlite 数据库文件路径
+  # 若改用 MySQL，取消下面注释并填写：
+  # host: 127.0.0.1      # MySQL 地址
+  # port: 3306           # MySQL 端口
+  # user: root           # 用户名
+  # password: "your_password"   # 密码（请勿提交真实密码）
+  # dbname: flowagent    # 数据库名
+  # charset: utf8mb4     # 字符集
 
 log:
   level: info          # 日志级别: debug / info / warn / error

@@ -23,7 +23,6 @@ flowagent 是一个对话驱动的全局工作流编排框架：把自然语言�
 
 - Go 1.25+
 - Node.js 18+
-- MySQL 或 SQLite（推荐 SQLite，零依赖开箱即用）
 
 ### 1. 安装依赖
 
@@ -35,18 +34,9 @@ bash install.sh
 install.bat
 ```
 
-自动检测 Go / Node.js / Python、编译后端、安装前端依赖、配置 skill 运行时依赖。
+自动检测 Go / Node.js / Python、生成默认配置 config/config.yaml（SQLite 零依赖）、编译后端、安装前端依赖、配置 skill 运行时依赖。
 
-### 2. 配置
-
-```bash
-cp config/config.example.yaml config/config.yaml
-# 编辑 config/config.yaml，配置 database 与 llm（provider / base_url / api_key / model）
-```
-
-> 数据库驱动可在前端「系统设置」里热切换（写入 `config/db_config.json`）。用 SQLite 时无需任何外部依赖。
-
-### 3. 启动
+### 2. 启动
 
 ```bash
 # Linux / macOS
