@@ -25,36 +25,38 @@ flowagent 是一个对话驱动的全局工作流编排框架：把自然语言�
 - Node.js 18+
 - MySQL 或 SQLite（推荐 SQLite，零依赖开箱即用）
 
-### 1. 准备配置
+### 1. 安装依赖
+
+```bash
+# Linux / macOS
+bash install.sh
+
+# Windows
+install.bat
+```
+
+自动检测 Go / Node.js / Python、编译后端、安装前端依赖、配置 skill 运行时依赖。
+
+### 2. 配置
 
 ```bash
 cp config/config.example.yaml config/config.yaml
 # 编辑 config/config.yaml，配置 database 与 llm（provider / base_url / api_key / model）
 ```
 
-### 2. 编译并启动后端
-
-```bash
-go build -trimpath -o bin/agent-server ./cmd/server
-go build -trimpath -o bin/agent-scheduler ./cmd/scheduler
-# 或一键编译：./build.sh
-
-./bin/agent-server -config config/config.yaml
-./bin/agent-scheduler -config config/config.yaml
-```
-
 > 数据库驱动可在前端「系统设置」里热切换（写入 `config/db_config.json`）。用 SQLite 时无需任何外部依赖。
 
-### 3. 启动前端
+### 3. 启动
 
 ```bash
-cd frontend
-npm install
-npm run dev      # 开发模式
-npm run build    # 生产构建到 dist/
+# Linux / macOS
+bash start.sh
+
+# Windows
+start.bat
 ```
 
-打开前端地址即可对话、查看 DAG 工作流。
+会拉起 agent-server + agent-scheduler + 前端。打开前端地址即可对话、查看 DAG 工作流。
 
 ## Why flowagent
 

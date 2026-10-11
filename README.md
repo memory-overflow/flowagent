@@ -25,36 +25,38 @@ Run flowagent with its built-in web UI:
 - Node.js 18+
 - MySQL or SQLite (SQLite is recommended for zero-dependency startup)
 
-### 1. Prepare config
+### 1. Install dependencies
+
+```bash
+# Linux / macOS
+bash install.sh
+
+# Windows
+install.bat
+```
+
+This checks Go / Node.js / Python, builds the backend, installs frontend dependencies, and sets up skill runtime dependencies.
+
+### 2. Configure
 
 ```bash
 cp config/config.example.yaml config/config.yaml
 # Edit config/config.yaml: set database and llm (provider / base_url / api_key / model)
 ```
 
-### 2. Build & run the backend
-
-```bash
-go build -trimpath -o bin/agent-server ./cmd/server
-go build -trimpath -o bin/agent-scheduler ./cmd/scheduler
-# or one-shot: ./build.sh
-
-./bin/agent-server -config config/config.yaml
-./bin/agent-scheduler -config config/config.yaml
-```
-
 > The database driver can be hot-switched in the frontend "System Settings" (writes `config/db_config.json`). SQLite requires no external dependencies.
 
-### 3. Run the frontend
+### 3. Start
 
 ```bash
-cd frontend
-npm install
-npm run dev      # development
-npm run build    # production build to dist/
+# Linux / macOS
+bash start.sh
+
+# Windows
+start.bat
 ```
 
-Open the frontend URL to chat and inspect DAG workflows.
+This launches agent-server + agent-scheduler + the frontend. Open the frontend URL to chat and inspect DAG workflows.
 
 ## Why flowagent
 
