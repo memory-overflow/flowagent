@@ -116,12 +116,14 @@ if has browser-use; then
   ok "browser-use 已安装：$(browser-use --version 2>&1 | head -1)"
   RESULTS="${RESULTS}  browser-use: ok\n"
 elif has uv; then
-  echo -n "  用 uv 安装 browser-use CLI（Python 3.12）... "
-  if uv tool install --python 3.12 browser-use >/dev/null 2>&1; then
+  # 去掉 >/dev/null 静默：browser-use 会连带下载独立 Python 3.12 + Playwright +
+  # Chromium 内核（几百 MB），静默时像卡死。透传 uv 的实时下载进度。
+  echo "  用 uv 安装 browser-use CLI（Python 3.12），下载较大（含 Playwright/Chromium），请耐心等待..."
+  if uv tool install --python 3.12 browser-use; then
     ok "browser-use 已安装：$(browser-use --version 2>&1 | head -1)"
     RESULTS="${RESULTS}  browser-use: ok\n"
   else
-    fail "browser-use 安装失败，请手动执行：uv tool install --python 3.12 browser-use"
+    fail "browser-use 安装失败（可选，不影响核心功能），可手动：uv tool install --python 3.12 browser-use"
     RESULTS="${RESULTS}  browser-use: FAIL\n"
   fi
 else
