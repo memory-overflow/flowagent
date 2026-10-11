@@ -36,6 +36,15 @@ install.bat
 
 自动检测 Go / Node.js / Python、生成默认配置 config/config.yaml（SQLite 零依赖）、编译后端、安装前端依赖、配置 skill 运行时依赖。
 
+> **国内网络加速（可选）**：直连 PyPI 较慢时，先设置国内镜像再安装。pip 与 uv 分别读下列环境变量：
+>
+> ```bash
+> export PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple      # pip：基础库、pdfkit 等
+> export UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple   # uv：browser-use
+> ```
+>
+> 想长期生效可写入 `~/.bashrc` 或 `~/.zshrc`。
+
 ### 2. 启动
 
 ```bash

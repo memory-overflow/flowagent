@@ -36,6 +36,15 @@ install.bat
 
 This checks Go / Node.js / Python, generates a default `config/config.yaml` (SQLite, zero-dependency), builds the backend, installs frontend dependencies, and sets up skill runtime dependencies.
 
+> **Slow network (e.g. in China)?** Set a PyPI mirror before installing — pip and uv read these env vars respectively:
+>
+> ```bash
+> export PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple      # pip: base libs, pdfkit, etc.
+> export UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple   # uv: browser-use
+> ```
+>
+> Persist them in `~/.bashrc` or `~/.zshrc` for permanent effect.
+
 ### 2. Start
 
 ```bash
