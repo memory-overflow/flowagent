@@ -18,7 +18,7 @@ echo === flowagent dependency installer ===
 
 REM --- 1. Go ---
 echo.
-echo [1/7] Check Go ^(1.25+ required^)
+echo [1/8] Check Go ^(1.25+ required^)
 where go >nul 2>nul
 if %errorlevel%==0 (
     echo   [OK] Go found
@@ -29,7 +29,7 @@ if %errorlevel%==0 (
 
 REM --- 2. Node.js ---
 echo.
-echo [2/7] Check Node.js ^(18+ required^)
+echo [2/8] Check Node.js ^(18+ required^)
 where node >nul 2>nul
 if %errorlevel%==0 (
     echo   [OK] Node.js found
@@ -40,7 +40,7 @@ if %errorlevel%==0 (
 
 REM --- 3. Python ---
 echo.
-echo [3/7] Check Python ^(3.10+ required^)
+echo [3/8] Check Python ^(3.10+ required^)
 where python >nul 2>nul
 if %errorlevel%==0 (
     echo   [OK] Python found
@@ -50,7 +50,7 @@ if %errorlevel%==0 (
 
 REM --- 4. Generate default config ---
 echo.
-echo [4/7] Generate default config
+echo [4/8] Generate default config
 if not exist config\config.yaml (
     copy config\config.example.yaml config\config.yaml >nul
     echo   [OK] config\config.yaml created from example ^(default sqlite^)
@@ -60,7 +60,7 @@ if not exist config\config.yaml (
 
 REM --- 5. Build backend ---
 echo.
-echo [5/7] Build backend
+echo [5/8] Build backend
 if not exist bin mkdir bin
 go build -trimpath -o bin\agent-server.exe ./cmd/server
 if %errorlevel% neq 0 (
@@ -76,7 +76,7 @@ echo   [OK] backend built
 
 REM --- 6. Frontend deps ---
 echo.
-echo [6/7] Install frontend dependencies
+echo [6/8] Install frontend dependencies
 cd frontend
 call npm install --no-audit --no-fund
 cd ..
