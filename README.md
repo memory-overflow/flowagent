@@ -11,7 +11,7 @@ A conversation-driven workflow orchestration framework — turn natural-language
 - [Features](#features)
 - [Two ways to use](#two-ways-to-use)
 - [API Overview](#api-overview)
-- [Directory Structure](#directory-structure)
+- [Documentation](#documentation)
 - [Star History](#star-history)
 - [License](#license)
 
@@ -95,6 +95,8 @@ flowagent ships a complete web UI with chat, workflow DAG visualization, model c
 
 Treat flowagent as the "agent kernel" of your own project and drive it over HTTP. Minimal integration is three steps:
 
+> The full input/output contracts and usage of the core API are documented in [docs/api.md](docs/api.md).
+
 ```bash
 # ① Create a conversation
 curl -X POST http://localhost:8080/api/v1/conversations/create \
@@ -142,30 +144,10 @@ All endpoints live under `/api/v1`, wrapped in a unified JSON envelope `{"code":
 
 See [`api/v1/workflow_agent.proto`](api/v1/workflow_agent.proto) for the full data structures.
 
-## Directory Structure
+## Documentation
 
-```
-flowagent/
-├── cmd/
-│   ├── server/        # HTTP API server entry
-│   └── scheduler/     # Stage scheduler entry (separate process)
-├── handler/           # HTTP routes & handlers
-├── dao/               # Data access layer
-├── model/             # Data models
-├── schedule/          # Scheduling core: DAG planning, sub-task execution, context compaction
-├── pkg/
-│   ├── llm/           # LLM clients (gemini / openai / azure / claude)
-│   ├── mcp/           # MCP tool protocol
-│   ├── skill/         # Skill system
-│   ├── stream/        # SSE & cross-process event forwarding
-│   └── workspace/     # Workspace & file tools (sandboxed)
-├── mcp/builtins/      # Built-in MCP manifests
-├── skills/            # Built-in skills
-├── api/v1/            # API definitions (proto)
-├── frontend/          # React frontend
-├── config/            # Config examples
-└── docs/              # Docs
-```
+- [Architecture & implementation](docs/architecture.md) — the overall technical architecture and implementation philosophy, explained module by module (the directory structure lives there).
+- [Core API reference](docs/api.md) — the full input/output contracts and usage for driving flowagent as an agent engine over HTTP.
 
 ## Star History
 

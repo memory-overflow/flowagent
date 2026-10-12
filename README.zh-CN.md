@@ -11,7 +11,7 @@ flowagent 是一个对话驱动的全局工作流编排框架：把自然语言�
 - [Features](#features)
 - [两种使用方式](#两种使用方式)
 - [API 概览](#api-概览)
-- [目录结构](#目录结构)
+- [文档](#文档)
 - [Star History](#star-history)
 - [License](#license)
 
@@ -95,6 +95,8 @@ flowagent 自带一个完整的 Web UI，包含对话、工作流 DAG 可视化�
 
 把 flowagent 当作你项目的「agent 内核」，通过 HTTP API 驱动。最小接入流程三步：
 
+> 核心 API 的完整输入/输出协议与使用方法见 [docs/api.md](docs/api.md)。
+
 ```bash
 # ① 创建对话
 curl -X POST http://localhost:8080/api/v1/conversations/create \
@@ -142,30 +144,10 @@ curl -X POST http://localhost:8080/api/v1/tasks/detail \
 
 完整的数据结构定义见 [`api/v1/workflow_agent.proto`](api/v1/workflow_agent.proto)。
 
-## 目录结构
+## 文档
 
-```
-flowagent/
-├── cmd/
-│   ├── server/        # HTTP API 服务入口
-│   └── scheduler/     # Stage 调度器入口（独立进程）
-├── handler/           # HTTP 路由与处理器
-├── dao/               # 数据访问层
-├── model/             # 数据模型
-├── schedule/          # 调度核心：DAG 规划、子任务执行、上下文压缩
-├── pkg/
-│   ├── llm/           # LLM 客户端（gemini / openai / azure / claude）
-│   ├── mcp/           # MCP 工具协议
-│   ├── skill/         # skill 系统
-│   ├── stream/        # SSE 与跨进程事件转发
-│   └── workspace/     # 工作区与文件工具（沙箱约束）
-├── mcp/builtins/      # 内置 MCP 清单
-├── skills/            # 内置 skill
-├── api/v1/            # API 定义（proto）
-├── frontend/          # React 前端
-├── config/            # 配置示例（example）
-└── docs/              # 文档
-```
+- [技术架构与实现理念](docs/architecture.md) —— 整体的技术架构与实现理念，分模块详解整个 agent 的实现（代码目录结构也在这里）。
+- [核心 API 参考](docs/api.md) —— 作为 agent 内核（HTTP API 接入）的完整输入/输出协议与使用方法。
 
 ## Star History
 
