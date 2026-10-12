@@ -1427,7 +1427,10 @@ function TaskMessage({
                     {formatElapsedMs(tickingMs)}
                     {task.progress != null && ` · ${task.progress.toFixed(0)}%`}
                   </span>
-                  {onStop && (
+                  {/* 已移交工作流的规划回复不显示「停止」：它本身已收口，真正在跑的是
+                      绑定的工作流，停止入口在工作流面板/横幅上。这里硬停只会被工作流
+                      下一轮 sync 刷回 running（与重试按钮的 delegatedToWorkflow 同理）。 */}
+                  {onStop && !delegatedToWorkflow && (
                     <button
                       type="button"
                       className="btn btn-warning btn-sm"

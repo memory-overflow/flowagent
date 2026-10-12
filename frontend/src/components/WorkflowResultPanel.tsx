@@ -40,11 +40,25 @@ function leafNodes(nodes: WorkflowNode[]): WorkflowNode[] {
 
 /** 叶子节点里真正有产出的（已完成且带文本或文件）。 */
 function finalNodes(nodes: WorkflowNode[]): WorkflowNode[] {
-  return leafNodes(nodes).filter(
+  const leaves = leafNodes(nodes).filter(
     (n) =>
       n.status === TaskStatus.COMPLETED &&
       (!!n.output?.reply_text?.trim() || (n.output?.output_files?.length ?? 0) > 0),
   );
+  // 多个叶子节点时只展示最后创建的一个：续接 / 重试会产生新的终点节点，
+  // 它才是「最新交付物」；旧叶子（如已被重试取代的失败节点）继续展示只会
+  // 带来误导性的重复内容。按 create_ts 取最大；旧数据缺 create_ts 时
+  // 回退到 nodes 数组顺序（后追加的节点排在后面）。
+  if (leaves.length <= 1) return leaves;
+  const last = [...leaves]
+    .sort((a, b) => {
+      const ta = a.create_ts ?? 0;
+      const tb = b.create_ts ?? 0;
+      if (ta !== tb) return ta - tb;
+      return nodes.indexOf(a) - nodes.indexOf(b);
+    })
+    .pop();
+  return last ? [last] : leaves;
 }
 
 interface Props {
