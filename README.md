@@ -23,7 +23,7 @@ A quick walkthrough of the core loop: add a model, start a conversation, and wat
 
 ![flowagent demo](docs/demo.gif)
 
-> ▶ Full walkthrough video (~9 min): [download demo.mp4](docs/demo.mp4)
+> ▶ Watch the full walkthrough (~9 min) on [YouTube](https://www.youtube.com/watch?v=11F32rEWOZQ)
 
 ## Quick Start
 
