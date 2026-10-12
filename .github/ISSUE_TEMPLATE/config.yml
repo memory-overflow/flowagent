@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Contributing / Contact the maintainer
+    url: mailto:zhengaohong@gmail.com
+    about: Questions, ideas, or want to become a maintainer? Reach out by email.

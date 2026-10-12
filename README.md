@@ -7,11 +7,13 @@ A conversation-driven workflow orchestration framework — turn natural-language
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [Demo](#demo)
 - [Why flowagent](#why-flowagent)
 - [Features](#features)
 - [Two ways to use](#two-ways-to-use)
 - [API Overview](#api-overview)
 - [Documentation](#documentation)
+- [Contributing](#contributing)
 - [Star History](#star-history)
 - [License](#license)
 
@@ -68,6 +70,12 @@ stop.bat
 ```
 
 This stops the services started above — only the processes under this project directory, leaving instances elsewhere untouched.
+
+## Demo
+
+A quick walkthrough of the core loop: add a model, start a conversation, and watch flowagent plan the request into a DAG workflow and execute it in parallel.
+
+<video src="docs/demo.mp4" controls width="100%"></video>
 
 ## Why flowagent
 
@@ -148,6 +156,14 @@ See [`api/v1/workflow_agent.proto`](api/v1/workflow_agent.proto) for the full da
 
 - [Architecture & implementation](docs/architecture.md) — the overall technical architecture and implementation philosophy, explained module by module (the directory structure lives there).
 - [Core API reference](docs/api.md) — the full input/output contracts and usage for driving flowagent as an agent engine over HTTP.
+
+## Contributing
+
+flowagent is open source and welcomes contributions. We're actively looking for collaborators to help build the framework — whether it's fixing bugs, adding MCP/skill integrations, improving the frontend, or writing docs.
+
+- Report bugs or propose features via issues.
+- Fork the repo and open a pull request.
+- Questions, ideas, or want to become a maintainer? Reach out at **zhengaohong@gmail.com**.
 
 ## Star History
 

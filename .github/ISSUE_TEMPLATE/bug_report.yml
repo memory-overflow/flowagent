@@ -1,0 +1,90 @@
+name: Bug Report
+description: Report a bug to help us improve
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please search [existing issues](https://github.com/memory-overflow/flowagent/issues) first to avoid duplicates.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the problem
+      placeholder: e.g. Stopping a conversation task that has planned a workflow still shows it as running, and the workflow keeps going
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Ordered steps that trigger the bug
+      placeholder: |
+        1. Start a conversation and let the model plan a workflow
+        2. Click "Stop" while the workflow is running
+        3. Observe the task status
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen
+      placeholder: The task should become "stopped" and the bound workflow should be stopped as well
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened (screenshots welcome)
+      placeholder: The task stays "running" and the workflow continues
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / Commit
+      description: The version or commit hash you are running (`git rev-parse HEAD`)
+      placeholder: v0.1.0 or 3f2a1b0
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: db
+    attributes:
+      label: Database backend
+      options:
+        - SQLite
+        - MySQL
+
+  - type: dropdown
+    id: model
+    attributes:
+      label: Model / Provider
+      description: The model used when reproducing, if relevant
+      options:
+        - OpenAI-compatible
+        - Gemini
+        - Azure OpenAI
+        - Claude
+        - Other / not applicable
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Screenshots
+      description: Paste relevant logs (logs/flowagent.log, logs/flowagent.scheduler.log) or drop in screenshots
+      render: shell

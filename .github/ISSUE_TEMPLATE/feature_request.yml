@@ -1,0 +1,39 @@
+name: Feature Request
+description: Suggest an idea to make flowagent better
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion! Please search [existing issues](https://github.com/memory-overflow/flowagent/issues) first to avoid duplicates.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Background
+      description: What problem does this solve? Why is it needed
+      placeholder: It's currently cumbersome to ..., I'd like to ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed feature
+      description: Describe the solution you'd like
+      placeholder: It would be great if flowagent supported ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Use case
+      description: A concrete example of how this feature would be used
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any alternative approaches you've considered and why they don't fit

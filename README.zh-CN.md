@@ -7,11 +7,13 @@ flowagent 是一个对话驱动的全局工作流编排框架：把自然语言�
 ## 目录
 
 - [Quick Start](#quick-start)
+- [Demo](#demo)
 - [Why flowagent](#why-flowagent)
 - [Features](#features)
 - [两种使用方式](#两种使用方式)
 - [API 概览](#api-概览)
 - [文档](#文档)
+- [参与贡献](#参与贡献)
 - [Star History](#star-history)
 - [License](#license)
 
@@ -68,6 +70,12 @@ stop.bat
 ```
 
 停止上面启动的服务——只停当前项目目录下的进程，不会误伤其他目录启动的实例。
+
+## Demo
+
+快速演示核心流程：添加模型 → 发起对话 → 规划出 DAG 工作流 → 并行执行 → 查看结果。
+
+<video src="docs/demo.mp4" controls width="100%"></video>
 
 ## Why flowagent
 
@@ -148,6 +156,14 @@ curl -X POST http://localhost:8080/api/v1/tasks/detail \
 
 - [技术架构与实现理念](docs/architecture.md) —— 整体的技术架构与实现理念，分模块详解整个 agent 的实现（代码目录结构也在这里）。
 - [核心 API 参考](docs/api.md) —— 作为 agent 内核（HTTP API 接入）的完整输入/输出协议与使用方法。
+
+## 参与贡献
+
+flowagent 是开源项目，欢迎一起开发。我们正在招募协作者，一起完善这个框架——修 bug、接入新的 MCP/skill、改进前端、完善文档都可以。
+
+- 提 issue 报告 bug 或提出新需求。
+- Fork 仓库后提交 pull request。
+- 有问题、有想法，或想成为维护者，欢迎联系：**zhengaohong@gmail.com**。
 
 ## Star History
 
