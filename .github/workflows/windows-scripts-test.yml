@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
     paths:
+      - '.github/workflows/**'
       - 'install.bat'
       - 'start.bat'
       - 'stop.bat'
