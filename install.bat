@@ -72,6 +72,11 @@ if %errorlevel% neq 0 (
     echo   [FAIL] build agent-scheduler failed
     exit /b 1
 )
+go build -trimpath -o bin\agent-supervisor.exe ./cmd/supervisor
+if %errorlevel% neq 0 (
+    echo   [FAIL] build agent-supervisor failed
+    exit /b 1
+)
 echo   [OK] backend built
 
 REM --- 6. Frontend deps ---
