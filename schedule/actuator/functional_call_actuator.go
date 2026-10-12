@@ -743,6 +743,11 @@ func runExecutingLoop(
 
 	needToolCall := len(result.ToolCalls) > 0
 
+	// 熔断原因：非空表示本轮触发了「熔断强制收口」（轮次/预算耗尽、连续失败、
+	// 连续无效、死循环）。这类收口是「没干完被迫停」，任务应判 failed 而非
+	// completed —— 否则工作流会把它当成功节点，汇总也走「全部成功」分支，掩盖失败。
+	var fuseReason string
+
 	// 6. 轮次耗尽 + 连续失败熔断检查。
 	//
 	// 状态机在 ToolCallRound 达到上限时会直接把任务判为 completed。
@@ -754,6 +759,7 @@ func runExecutingLoop(
 		log.Printf("[func-call-actuator][%s] tool call round exhausted (%d/%d), force finish",
 			temp.TaskID, round, maxRound)
 		needToolCall = false
+		fuseReason = fmt.Sprintf("工具调用轮次耗尽（%d/%d）", round, maxRound)
 		if strings.TrimSpace(result.Text) == "" {
 			result.Text = fmt.Sprintf(
 				"抱歉，本次任务已达到工具调用次数上限（%d 次），未能得出完整结论。", maxRound)
@@ -771,6 +777,7 @@ func runExecutingLoop(
 			log.Printf("[func-call-actuator][%s] tool call budget exhausted (%d/%d calls), force finish",
 				temp.TaskID, used, budget)
 			needToolCall = false
+			fuseReason = fmt.Sprintf("工具调用总次数耗尽（%d/%d）", used, budget)
 			if strings.TrimSpace(result.Text) == "" {
 				result.Text = fmt.Sprintf(
 					"抱歉，本次检索已达到工具调用次数上限（%d 次），未能覆盖全部方向。以上结论基于已获取的信息。",
@@ -792,6 +799,7 @@ func runExecutingLoop(
 		log.Printf("[func-call-actuator][%s] same tool call failed %d times in a row (%d/%d), force finish",
 			temp.TaskID, consecutiveFails, consecutiveFails, model.DefaultMaxConsecutiveFailures)
 		needToolCall = false
+		fuseReason = fmt.Sprintf("同一工具调用连续失败 %d 次", consecutiveFails)
 		if strings.TrimSpace(result.Text) == "" {
 			result.Text = fmt.Sprintf(
 				"抱歉，同一个工具调用（相同的工具与参数）已连续失败 %d 次，为避免无限重试已停止。请检查工具配置或换一种方式提问。",
@@ -810,6 +818,7 @@ func runExecutingLoop(
 			log.Printf("[func-call-actuator][%s] consecutive low-value tool calls (%d/%d), force finish",
 				temp.TaskID, streak, model.DefaultMaxLowValueToolCalls)
 			needToolCall = false
+			fuseReason = fmt.Sprintf("连续 %d 次检索未取得有效内容", streak)
 			if strings.TrimSpace(result.Text) == "" {
 				result.Text = fmt.Sprintf(
 					"抱歉，连续 %d 次检索都没有拿到有效内容（返回为空或过短），已停止继续检索。"+
@@ -829,6 +838,7 @@ func runExecutingLoop(
 		log.Printf("[func-call-actuator][%s] repeated identical tool calls (%d/%d), force finish (dead loop)",
 			temp.TaskID, repeatedCalls, model.DefaultMaxRepeatedToolCalls)
 		needToolCall = false
+		fuseReason = fmt.Sprintf("连续 %d 轮重复请求相同工具调用（死循环）", repeatedCalls)
 		if strings.TrimSpace(result.Text) == "" {
 			result.Text = fmt.Sprintf(
 				"抱歉，检测到连续 %d 轮重复请求了相同的工具调用，判定为死循环，已停止。请换一种方式提问，或检查工具执行结果是否有变化。",
@@ -891,6 +901,14 @@ func runExecutingLoop(
 	} else {
 		log.Printf("[func-call-actuator][%s] turn #%d done → finished (answer %d chars)",
 			temp.TaskID, turn.TurnSeq, len(result.Text))
+	}
+
+	// 熔断收口 → 返回错误，让框架走 ToFailedStatus 把任务标 failed 并写入
+	// failed_reason。注意 turn 已在上面 FinishTurn 标为 success（保留了 LLM
+	// 输出与 token 统计），这里只是把「任务整体没干完、被熔断强制停」这个
+	// 事实交给状态机 —— 二者是不同层次，不冲突。
+	if fuseReason != "" {
+		return nil, fmt.Errorf("func-call-actuator: %s，任务被熔断强制收口", fuseReason)
 	}
 	return nil, nil
 }

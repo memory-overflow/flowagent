@@ -165,7 +165,7 @@ func toolCallImpl(ctx context.Context, task *framework.Task) (data interface{}, 
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			ok, execErr := executeOneToolCall(ctx, temp, toolSet, pending[idx], summary, visionAnalyzer)
+			ok, execErr := executeOneToolCall(ctx, temp, toolSet, pending[idx], summary, visionAnalyzer, idx)
 			outcomes[idx] = callOutcome{call: pending[idx], succeeded: ok, infraErr: execErr}
 		}(i)
 	}
@@ -319,6 +319,7 @@ func executeOneToolCall(
 	call llm.ToolCall,
 	fallbackSummary string,
 	visionAnalyzer workspacepkg.VisionAnalyzerFunc,
+	index int,
 ) (succeeded bool, err error) {
 	// 从 args 提取 summary 并剥离。剥离必须在转发真实工具之前完成：
 	// summary 是框架注入的元参数，MCP server 会因未知字段报错。
@@ -336,7 +337,7 @@ func executeOneToolCall(
 	// 下一轮很可能重复请求同一个不存在的工具，陷入死循环。
 	// 记 turn 失败才是基础设施异常；记成功则是「工具调用失败」（succeeded=false）。
 	if !found {
-		if recErr := recordUnknownTool(ctx, temp, call, toolSet, summary); recErr != nil {
+		if recErr := recordUnknownTool(ctx, temp, call, toolSet, summary, index); recErr != nil {
 			return false, recErr
 		}
 		return false, nil
@@ -357,7 +358,7 @@ func executeOneToolCall(
 		Round:      currentToolCallRoundForTool(ctx, temp.TaskID, taskPhaseOf(temp)),
 		ToolName:   call.Name,
 		ServerName: serverName,
-		Input:      buildToolTurnInput(call.Name, serverName, summary, call.Arguments),
+		Input:      buildToolTurnInput(call.Name, serverName, summary, call.Arguments, index),
 	})
 	if err != nil {
 		return false, fmt.Errorf("begin turn: %w", err)
@@ -720,7 +721,7 @@ func extractToolSummary(args map[string]interface{}) (summary string, clean map[
 // 必须记录：这样下一轮 functional_call 重建历史时，LLM 会看到
 // "该工具不存在，可用工具是 xxx" 的反馈，从而纠正自己的选择。
 func recordUnknownTool(
-	ctx context.Context, temp *model.TaskTemp, call llm.ToolCall, toolSet *ToolSet, summary string,
+	ctx context.Context, temp *model.TaskTemp, call llm.ToolCall, toolSet *ToolSet, summary string, index int,
 ) error {
 	turn, err := toolCallRegistry.turnDAO.BeginTurn(ctx, dao.BeginTurnParams{
 		TaskID:       temp.TaskID,
@@ -731,7 +732,7 @@ func recordUnknownTool(
 		Stage:        model.TaskStage(temp.Stage),
 		Round:        currentToolCallRoundForTool(ctx, temp.TaskID, taskPhaseOf(temp)),
 		ToolName:     call.Name,
-		Input:        buildToolTurnInput(call.Name, "", summary, call.Arguments),
+		Input:        buildToolTurnInput(call.Name, "", summary, call.Arguments, index),
 	})
 	if err != nil {
 		return fmt.Errorf("begin turn for unknown tool: %w", err)

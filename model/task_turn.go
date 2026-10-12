@@ -263,6 +263,12 @@ type TurnToolInput struct {
 	// tool_call 阶段执行时透传进来，供思考过程默认折叠展示。
 	// 为空时展示层退化为「调用工具 X」。
 	Summary string `json:"summary,omitempty"`
+	// Index 本轮 assistant 声明的 tool_calls 中的序号（0-based，声明顺序）。
+	//
+	// 工具调用是并发执行的，turn_seq 按完成顺序分配、未必等于声明顺序；
+	// 回喂 LLM 时需按此序号恢复声明顺序，否则「参数（如 read_file 的 path）
+	// 与返回内容」会错位，模型拿到对不上的结果反复重试，最终死循环。
+	Index int `json:"index,omitempty"`
 }
 
 // TurnToolOutput 工具调用的输出快照

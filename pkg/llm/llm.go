@@ -46,6 +46,12 @@ type Message struct {
 	// provider —— 各协议的请求体是按字段显式组装的，不会带出去。
 	// 只在「从 task_turn 重建历史」的路径上写入，重建之外的消息为零值。
 	SourceTurnID int64 `json:"-"`
+	// ToolCallIndex 该 tool 结果消息对应 assistant 声明的第几个 tool_call（0-based）。
+	//
+	// 工具调用并发执行后 turn_seq 是完成顺序、未必等于声明顺序；回喂 LLM 时
+	// 需按此恢复声明顺序，否则「参数（如 read_file 的 path）与返回内容」错位。
+	// 仅 tool 结果消息使用，纯内部排序字段，不参与序列化（同 SourceTurnID）。
+	ToolCallIndex int `json:"-"`
 }
 
 // ImagePart 一张图片的多模态输入。

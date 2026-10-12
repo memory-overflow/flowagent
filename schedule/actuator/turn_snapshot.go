@@ -115,12 +115,13 @@ func buildLLMTurnOutput(result *llm.ChatResult) *model.TurnLLMOutput {
 }
 
 // buildToolTurnInput 把一次工具调用转为 turn 输入快照
-func buildToolTurnInput(toolName, serverName, summary string, args map[string]interface{}) *model.TurnToolInput {
+func buildToolTurnInput(toolName, serverName, summary string, args map[string]interface{}, index int) *model.TurnToolInput {
 	return &model.TurnToolInput{
 		ToolName:   toolName,
 		ServerName: serverName,
 		Arguments:  args,
 		Summary:    summary,
+		Index:      index,
 	}
 }
 

@@ -82,6 +82,23 @@ func StopTask(ctx *gin.Context, req interface{}) (interface{}, error) {
 		return nil, &APIError{Code: http.StatusBadRequest, Msg: "任务已处于终态，无法停止"}
 	}
 
+	// 对话任务若已把本轮工作移交给工作流（规划判定 workflow 后当轮收口，
+	// agent_output.workflow_task_id 非空），停止动作应转发到它绑定的工作流任务：
+	// 对话任务自身已收口、无可停止，真正在跑的是工作流。只停对话任务会让工作流
+	// 继续推进，下一轮 SyncWorkflowSourceTaskStatuses 又会把对话任务的绑定态
+	// （DeriveBoundTaskStatus 跟随工作流节点）刷回 running，表现为「停止没效果」。
+	if task.TaskType == model.TaskTypeConversation {
+		if wfID := boundWorkflowTaskID(task); wfID != "" && wfID != r.TaskID {
+			if wfTask, err := taskDAO.GetTaskByID(ctx, wfID); err != nil {
+				return nil, err
+			} else if wfTask != nil && !wfTask.IsTerminal() {
+				// 递归停工作流：级联停其子任务 + 标 stopped + sync 来源对话任务为 stopped。
+				return StopTask(ctx, &StopTaskRequest{TaskID: wfID})
+			}
+			// 绑定工作流不存在或已终态：落到普通对话任务停止（它本已收口，最多补标 stopped）。
+		}
+	}
+
 	// 级联停止整棵子树里仍在排队/运行中的后代任务，避免它们被调度器继续捞起执行。
 	//
 	// 不限定任务类型：对话任务（single_agent 模式）也会挂 deep_search 子任务，
@@ -149,6 +166,21 @@ func stopTaskDescendants(ctx context.Context, taskDAO *dao.TaskDAO, rootTaskID s
 // StopTaskBinder 绑定 StopTask 请求参数
 func StopTaskBinder() interface{} {
 	return &StopTaskRequest{}
+}
+
+// boundWorkflowTaskID 返回对话任务在规划判定 workflow 后绑定的工作流任务 ID。
+//
+// 绑定关系落在 agent_output.workflow_task_id（delegateToWorkflow 收口时写入）。
+// 非对话任务、task_output 为空或解析失败时返回空串。
+func boundWorkflowTaskID(task *model.Task) string {
+	if task == nil || task.TaskType != model.TaskTypeConversation || task.TaskOutput == "" {
+		return ""
+	}
+	var out model.AgentOutputData
+	if err := json.Unmarshal([]byte(task.TaskOutput), &out); err != nil {
+		return ""
+	}
+	return out.WorkflowTaskID
 }
 
 // ============================================================

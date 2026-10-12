@@ -574,9 +574,49 @@ type toolCallAcc struct {
 	argsBuf strings.Builder
 }
 
+// streamIdleTimeout 流式读取的空闲超时：连续这么长时间没有收到任何新数据，
+// 就判定流已死，返回错误交由上层（functional_call 执行器，maxRetries=3）重试，
+// 而不是永久阻塞等 15 分钟看门狗强杀。
+//
+// 背景：lkeap 网关的 deepseek 在生成长 reasoning 后偶发「不发送 [DONE] 也不
+// 关闭连接」，bufio.Scanner 会因此永久阻塞在 Scan() 上（现象：云平台已统计
+// token，但 flowagent 侧 turn 一直 running、total_tokens=0）。
+// 空闲超时只约束「连续多久没有新数据」，正常生成（持续有 delta 到达）不受影响。
+const streamIdleTimeout = 2 * time.Minute
+
+// idleTimeoutReader 在底层 reader 连续 idle 超过 timeout 时返回错误，
+// 打破 bufio.Scanner 对半开连接的永久阻塞。
+//
+// 用 goroutine + channel 而非 SetReadDeadline：http.Response.Body 中间隔着
+// bufio/chunked 层，拿不到底层 net.Conn，类型断言 SetReadDeadline 不可靠。
+// 超时后仍阻塞在底层 Read 的 goroutine 会随 resp.Body.Close() 解除，泄漏有限。
+type idleTimeoutReader struct {
+	r       io.Reader
+	timeout time.Duration
+}
+
+func (r *idleTimeoutReader) Read(p []byte) (int, error) {
+	type readResult struct {
+		n   int
+		err error
+	}
+	ch := make(chan readResult, 1)
+	go func() {
+		n, err := r.r.Read(p)
+		ch <- readResult{n, err}
+	}()
+	select {
+	case v := <-ch:
+		return v.n, v.err
+	case <-time.After(r.timeout):
+		return 0, fmt.Errorf("openai stream idle timeout: no data for %v", r.timeout)
+	}
+}
+
 // parseStream 解析 text/event-stream 响应，逐 chunk 回调文本增量，
 // 累积工具调用分片，最终返回与阻塞式等价的 ChatResult。
 func (c *Client) parseStream(body io.Reader, onDelta func(llm.StreamDelta)) (*llm.ChatResult, error) {
+	body = &idleTimeoutReader{r: body, timeout: streamIdleTimeout}
 	scanner := bufio.NewScanner(body)
 	// 单行 data 可能很长（含大段 arguments），放大默认 buffer
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)

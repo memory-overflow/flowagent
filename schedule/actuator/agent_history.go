@@ -27,6 +27,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -361,7 +362,7 @@ func buildSegmentedHistory(
 	// 末尾的 assistant」与「后一个 task 开头的 tool」被误判成一对。
 	out := make([]historySegment, 0, len(segs))
 	for i := range segs {
-		segs[i].Messages = dropOrphanToolResults(segs[i].Messages)
+		segs[i].Messages = sortToolResultsByIndex(dropOrphanToolResults(segs[i].Messages))
 		if len(segs[i].Messages) == 0 {
 			continue // 清理后空段直接丢弃
 		}
@@ -370,7 +371,7 @@ func buildSegmentedHistory(
 
 	// 与 buildCurrentHistory 同源：当前段同样要老化，否则缓存未命中时
 	// （首轮 / 缓存被清）会退化成全量回放。
-	return out, mergeAdjacentUsers(dropOrphanToolResults(ageCurrentToolResults(currentMsgs))), nil
+	return out, mergeAdjacentUsers(sortToolResultsByIndex(dropOrphanToolResults(ageCurrentToolResults(currentMsgs)))), nil
 }
 
 // flattenSegments 把分段历史拍平成消息列表。
@@ -413,7 +414,7 @@ func buildCurrentHistory(
 	// 工具结果老化：长任务里几十条工具结果常驻上下文，只保留最近若干条全文，
 	// 更早的降级为摘要级 / 带取回句柄的占位（见 tool_result_aging.go）。
 	// 放在 dropOrphan 之前：老化只改内容不动角色，配对关系不受影响。
-	return mergeAdjacentUsers(dropOrphanToolResults(ageCurrentToolResults(msgs))), nil
+	return mergeAdjacentUsers(sortToolResultsByIndex(dropOrphanToolResults(ageCurrentToolResults(msgs)))), nil
 }
 
 // mergeAdjacentUsers 折叠相邻的 user 消息，只保留最后一条。
@@ -771,6 +772,35 @@ func dropOrphanToolResults(messages []llm.Message) []llm.Message {
 	return out
 }
 
+// sortToolResultsByIndex 把每个 assistant(tool_calls) 之后的连续 tool 结果段，
+// 按 ToolCallIndex（声明顺序）稳定重排。
+//
+// 工具调用是并发执行的，turn_seq 按完成顺序分配、未必等于声明顺序；重建历史
+// 时若不重排，「参数（如 read_file 的 path）与返回内容」会错位，模型拿到对不上
+// 的结果反复重试，最终触发死循环熔断。
+//
+// 旧数据没有 index（全 0）时，稳定排序保持原序（= turn_seq 顺序），行为不变。
+func sortToolResultsByIndex(messages []llm.Message) []llm.Message {
+	for i := 0; i < len(messages); i++ {
+		if messages[i].Role != llm.RoleAssistant || len(messages[i].ToolCalls) == 0 {
+			continue
+		}
+		// 找到其后连续的 tool 结果段 [i+1, j)
+		j := i + 1
+		for j < len(messages) && messages[j].Role == llm.RoleTool {
+			j++
+		}
+		if j-i-1 > 1 {
+			seg := messages[i+1 : j]
+			sort.SliceStable(seg, func(a, b int) bool {
+				return seg[a].ToolCallIndex < seg[b].ToolCallIndex
+			})
+		}
+		i = j - 1
+	}
+	return messages
+}
+
 // planningTurnToMessage 把规划期的一次 LLM 调用还原成 assistant 消息。
 //
 // 与 functionalCallTurnToMessage 的唯一差别：过滤掉 submit_plan 协议工具调用。
@@ -878,12 +908,16 @@ func functionalCallTurnToMessage(t *model.TaskTurn) (llm.Message, bool) {
 // 失败的 turn 也会生成消息，内容为错误说明，让 LLM 知道工具为何没成功。
 // 回喂前对超长结果做截断，避免 fetch/读文件等大结果撑爆上下文。
 func toolCallTurnToMessage(t *model.TaskTurn) (llm.Message, bool) {
-	// 工具名优先取冗余列，回退到 input 快照
+	// 工具名优先取冗余列，回退到 input 快照；同时取声明序号 index。
 	toolName := t.ToolName
-	if toolName == "" && t.Input != "" {
+	index := 0
+	if t.Input != "" {
 		var in model.TurnToolInput
 		if err := json.Unmarshal([]byte(t.Input), &in); err == nil {
-			toolName = in.ToolName
+			if toolName == "" {
+				toolName = in.ToolName
+			}
+			index = in.Index
 		}
 	}
 	if toolName == "" {
@@ -913,9 +947,10 @@ func toolCallTurnToMessage(t *model.TaskTurn) (llm.Message, bool) {
 	}
 
 	return llm.Message{
-		Role:     llm.RoleTool,
-		ToolName: toolName,
-		Content:  truncateToolResult(content),
+		Role:          llm.RoleTool,
+		ToolName:      toolName,
+		Content:       truncateToolResult(content),
+		ToolCallIndex: index,
 	}, true
 }
 
