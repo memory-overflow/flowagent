@@ -81,6 +81,12 @@ func toolCallImpl(ctx context.Context, task *framework.Task) (data interface{}, 
 	log.Printf("[tool-call-actuator][%s] start (chat=%s turn_count=%d)",
 		temp.TaskID, temp.ChatID, temp.TurnCount)
 
+	// 停止感知：整个 tool_call 阶段（工具执行，deep_search / 长命令等可能耗时
+	// 很久）挂停止检查，任务被停止即 cancel 在途的工具调用。
+	guardCtx, cleanup := withStopGuard(ctx, temp.TaskID)
+	defer cleanup()
+	ctx = guardCtx
+
 	// 1. 取出待执行的工具调用，同时拿回承载它们的 LLM turn 序号（幂等判断用）
 	// 与模型给出的说明文本（思考过程默认折叠展示用）。
 	pending, summary, llmTurnSeq, err := loadPendingToolCalls(ctx, toolCallRegistry.turnDAO, temp.TaskID)
