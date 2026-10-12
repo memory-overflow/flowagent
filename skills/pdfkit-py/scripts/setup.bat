@@ -5,6 +5,11 @@ REM Usage: scripts\setup.bat          core dependencies only
 REM        scripts\setup.bat --all    all dependencies
 
 chcp 65001 >nul 2>nul
+REM 强制 Python 走 UTF-8：Windows 下 Python 的 stdout 默认用 locale 编码
+REM （cp1252/cp936），而 chcp 只切 console 不影响 Python 编码。pdfkit.py help
+REM 会打印中文命令描述，非 UTF-8 时 UnicodeEncodeError → 退出码非 0，
+REM 被 smoke test 误判为失败。PYTHONUTF8=1 让后续所有 python 子进程走 UTF-8。
+set "PYTHONUTF8=1"
 
 set "SCRIPTS_DIR=%~dp0"
 if "!SCRIPTS_DIR:~-1!"=="\" set "SCRIPTS_DIR=!SCRIPTS_DIR:~0,-1!"
@@ -150,7 +155,7 @@ if !errorlevel! NEQ 0 (
 )
 echo [OK] PyMuPDF OK
 
-"!VPYTHON!" "!SCRIPTS_DIR!\pdfkit.py" help >nul 2>nul
+"!VPYTHON!" "!SCRIPTS_DIR!\pdfkit.py" help >nul
 if !errorlevel! NEQ 0 (
     echo [ERROR] pdfkit.py failed to run, check the above errors
     exit /b 1
