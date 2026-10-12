@@ -75,7 +75,9 @@ This stops the services started above — only the processes under this project 
 
 A quick walkthrough of the core loop: add a model, start a conversation, and watch flowagent plan the request into a DAG workflow and execute it in parallel.
 
-<video src="docs/demo.mp4" controls width="100%"></video>
+**▶ [Watch the demo video](docs/demo.mp4)**
+
+[![flowagent demo](docs/demo-cover.jpg)](docs/demo.mp4)
 
 ## Why flowagent
 

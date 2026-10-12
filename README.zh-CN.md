@@ -75,7 +75,9 @@ stop.bat
 
 快速演示核心流程：添加模型 → 发起对话 → 规划出 DAG 工作流 → 并行执行 → 查看结果。
 
-<video src="docs/demo.mp4" controls width="100%"></video>
+**▶ [观看演示视频](docs/demo.mp4)**
+
+[![flowagent demo](docs/demo-cover.jpg)](docs/demo.mp4)
 
 ## Why flowagent
 
