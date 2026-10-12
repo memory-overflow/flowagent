@@ -1,0 +1,56 @@
+name: Windows scripts test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'install.bat'
+      - 'start.bat'
+      - 'stop.bat'
+      - 'requirements-base.txt'
+      - 'skills/**'
+      - 'mcp/builtins/**'
+
+jobs:
+  install-bat:
+    name: Verify install.bat on Windows
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run install.bat
+        shell: cmd
+        run: install.bat
+
+      - name: Verify backend binaries
+        shell: pwsh
+        run: |
+          $bins = @('agent-server', 'agent-scheduler', 'agent-supervisor')
+          foreach ($b in $bins) {
+            if (-not (Test-Path "bin\$b.exe")) { throw "缺少 bin\$b.exe" }
+          }
+          Write-Host "后端二进制 .exe 均编译成功"
+
+      - name: Verify default config
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "config\config.yaml")) { throw "config.yaml 未生成" }
+          Write-Host "config.yaml 已生成"
