@@ -6,8 +6,8 @@ A conversation-driven workflow orchestration framework — turn natural-language
 
 ## Table of Contents
 
-- [Quick Start](#quick-start)
 - [Demo](#demo)
+- [Quick Start](#quick-start)
 - [Why flowagent](#why-flowagent)
 - [Features](#features)
 - [Two ways to use](#two-ways-to-use)
@@ -16,6 +16,14 @@ A conversation-driven workflow orchestration framework — turn natural-language
 - [Contributing](#contributing)
 - [Star History](#star-history)
 - [License](#license)
+
+## Demo
+
+A quick walkthrough of the core loop: add a model, start a conversation, and watch flowagent plan the request into a DAG workflow and execute it in parallel.
+
+**▶ [Watch the demo video](docs/demo.mp4)**
+
+[![flowagent demo](docs/demo-cover.jpg)](docs/demo.mp4)
 
 ## Quick Start
 
@@ -70,14 +78,6 @@ stop.bat
 ```
 
 This stops the services started above — only the processes under this project directory, leaving instances elsewhere untouched.
-
-## Demo
-
-A quick walkthrough of the core loop: add a model, start a conversation, and watch flowagent plan the request into a DAG workflow and execute it in parallel.
-
-**▶ [Watch the demo video](docs/demo.mp4)**
-
-[![flowagent demo](docs/demo-cover.jpg)](docs/demo.mp4)
 
 ## Why flowagent
 

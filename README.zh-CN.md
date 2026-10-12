@@ -6,18 +6,26 @@ flowagent 是一个对话驱动的全局工作流编排框架：把自然语言�
 
 ## 目录
 
-- [Quick Start](#quick-start)
-- [Demo](#demo)
-- [Why flowagent](#why-flowagent)
-- [Features](#features)
+- [演示](#演示)
+- [快速开始](#快速开始)
+- [为什么选择 flowagent](#为什么选择-flowagent)
+- [功能特性](#功能特性)
 - [两种使用方式](#两种使用方式)
 - [API 概览](#api-概览)
 - [文档](#文档)
 - [参与贡献](#参与贡献)
-- [Star History](#star-history)
-- [License](#license)
+- [Star 历史](#star-历史)
+- [许可证](#许可证)
 
-## Quick Start
+## 演示
+
+快速演示核心流程：添加模型 → 发起对话 → 规划出 DAG 工作流 → 并行执行 → 查看结果。
+
+**▶ [观看演示视频](docs/demo.mp4)**
+
+[![flowagent demo](docs/demo-cover.jpg)](docs/demo.mp4)
+
+## 快速开始
 
 使用自带前端快速启动：
 
@@ -71,21 +79,13 @@ stop.bat
 
 停止上面启动的服务——只停当前项目目录下的进程，不会误伤其他目录启动的实例。
 
-## Demo
-
-快速演示核心流程：添加模型 → 发起对话 → 规划出 DAG 工作流 → 并行执行 → 查看结果。
-
-**▶ [观看演示视频](docs/demo.mp4)**
-
-[![flowagent demo](docs/demo-cover.jpg)](docs/demo.mp4)
-
-## Why flowagent
+## 为什么选择 flowagent
 
 1. **好用好接入的开源 agent 框架缺失**。目前没有一个好用的开源 agent 框架可供企业或个人直接接入——要么自己从零造轮子，要么只能绑定某家云厂商的云上 agent。flowagent 想做的，就是一个**好接入、功能完善的开源 agent 框架**。
 
 2. **ReAct 串行太慢，DAG 并行加速长程任务**。现有 agent 大多是 ReAct 框架，规划出任务后只能一步步串行执行，长任务耗时长。flowagent 把任务规划成 **DAG**，让无依赖的子任务**并行执行**，显著加速长程任务的落地。
 
-## Features
+## 功能特性
 
 - **对话 → DAG 规划**：把一段自然语言需求规划成一张有向无环图（DAG），每个节点是一个子任务，`depends_on` 表达依赖关系。
 - **并行子任务调度**：无依赖的子任务并行执行，上游节点的输出自动注入下游节点。
@@ -99,7 +99,7 @@ stop.bat
 
 ### 方式一：使用自带前端
 
-flowagent 自带一个完整的 Web UI，包含对话、工作流 DAG 可视化、模型配置、MCP/skill 管理等功能。快速上手见 [Quick Start](#quick-start)。
+flowagent 自带一个完整的 Web UI，包含对话、工作流 DAG 可视化、模型配置、MCP/skill 管理等功能。快速上手见 [快速开始](#快速开始)。
 
 ### 方式二：作为核心 agent 引擎（API 接入）
 
@@ -167,11 +167,11 @@ flowagent 是开源项目，欢迎一起开发。我们正在招募协作者，�
 - Fork 仓库后提交 pull request。
 - 有问题、有想法，或想成为维护者，欢迎联系：**zhengaohong@gmail.com**。
 
-## Star History
+## Star 历史
 
 [![Star History Chart](https://api.star-history.com/svg?repos=memory-overflow/flowagent&type=Date)](https://star-history.com/#memory-overflow/flowagent&Date)
 
-## License
+## 许可证
 
 [Apache License 2.0](LICENSE)。
 
