@@ -31,7 +31,7 @@ Run flowagent with its built-in web UI:
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.21+ (1.25+ recommended; older versions auto-download the required toolchain on first build)
 - Node.js 18+
 
 ### 1. Install dependencies

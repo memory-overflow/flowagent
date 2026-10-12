@@ -32,9 +32,31 @@ echo "平台: $OS   目录: $ROOT"
 MISSING=0
 
 # ── 1. Go ──
-step "1. Go（需 1.25+）"
+step "1. Go（需 1.21+，推荐 1.25+；低于 1.25 时首次编译会自动下载对应工具链）"
 if has go; then
   ok "go $(go version | awk '{print $3}')"
+  # 版本检查：
+  #   - go < 1.21 不支持 GOTOOLCHAIN 自动切换，只能升级；
+  #   - go 1.21 ~ 1.24 依赖工具链自动切换编译本项目（go.mod 要求 1.25.5，
+  #     由 mcp-go 依赖引入），GOTOOLCHAIN=local/off 的环境会编译失败，
+  #     编译命令已统一加 GOTOOLCHAIN=auto 兜底，这里只做提示。
+  GO_VER="$(go version | awk '{print $3}' | sed 's/^go//')"
+  GO_MAJOR="$(echo "$GO_VER" | cut -d. -f1)"
+  GO_MINOR="$(echo "$GO_VER" | cut -d. -f2)"
+  if [ "$GO_MAJOR" -lt 1 ] || { [ "$GO_MAJOR" -eq 1 ] && [ "$GO_MINOR" -lt 21 ]; }; then
+    fail "Go 版本过低（$GO_VER，需 1.21+）"
+    echo "  请升级：https://go.dev/dl/"
+    MISSING=1
+  elif [ "$GO_MAJOR" -eq 1 ] && [ "$GO_MINOR" -lt 25 ]; then
+    GO_TOOLCHAIN="$(go env GOTOOLCHAIN 2>/dev/null || echo auto)"
+    if [ "$GO_TOOLCHAIN" = "local" ] || [ "$GO_TOOLCHAIN" = "off" ]; then
+      warn "go $GO_VER 低于 go.mod 要求的 1.25.5，且 GOTOOLCHAIN=$GO_TOOLCHAIN 会阻止自动切换"
+      echo "  本脚本编译时已强制 GOTOOLCHAIN=auto，会自动下载 go1.25.5 工具链（走 GOPROXY，约 70MB，仅需一次）；"
+      echo "  若下载失败，请升级 Go 到 1.25+：https://go.dev/dl/"
+    else
+      ok "首次编译会自动下载 go1.25.5 工具链（走 GOPROXY，约 70MB，仅需一次）"
+    fi
+  fi
 else
   fail "未找到 Go"
   echo "  macOS: brew install go"
@@ -79,9 +101,11 @@ fi
 # ── 5. 编译后端 ──
 step "5. 编译后端（bin/agent-server + bin/agent-scheduler）"
 mkdir -p bin
-go build -trimpath -o bin/agent-server ./cmd/server && ok "bin/agent-server"
-go build -trimpath -o bin/agent-scheduler ./cmd/scheduler && ok "bin/agent-scheduler"
-go build -trimpath -o bin/agent-supervisor ./cmd/supervisor && ok "bin/agent-supervisor"
+# GOTOOLCHAIN=auto：本机 Go 低于 go.mod 要求（1.25.5）时自动下载对应工具链，
+# 覆盖 GOTOOLCHAIN=local/off 的环境（Go 已 >= 1.25 时该变量无任何额外动作）。
+GOTOOLCHAIN=auto go build -trimpath -o bin/agent-server ./cmd/server && ok "bin/agent-server"
+GOTOOLCHAIN=auto go build -trimpath -o bin/agent-scheduler ./cmd/scheduler && ok "bin/agent-scheduler"
+GOTOOLCHAIN=auto go build -trimpath -o bin/agent-supervisor ./cmd/supervisor && ok "bin/agent-supervisor"
 
 # ── 6. 前端依赖 ──
 step "6. 安装前端依赖（frontend/node_modules）"

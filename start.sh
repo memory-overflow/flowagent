@@ -40,9 +40,11 @@ fi
 if [ ! -x bin/agent-server ] || [ ! -x bin/agent-scheduler ] || [ ! -x bin/agent-supervisor ]; then
   echo "编译后端..."
   mkdir -p bin
-  go build -trimpath -o bin/agent-server ./cmd/server || { fail "编译 agent-server 失败"; exit 1; }
-  go build -trimpath -o bin/agent-scheduler ./cmd/scheduler || { fail "编译 agent-scheduler 失败"; exit 1; }
-  go build -trimpath -o bin/agent-supervisor ./cmd/supervisor || { fail "编译 agent-supervisor 失败"; exit 1; }
+  # GOTOOLCHAIN=auto：本机 Go 低于 go.mod 要求（1.25.5）时自动下载对应工具链，
+  # 覆盖 GOTOOLCHAIN=local/off 的环境（Go 已 >= 1.25 时该变量无任何额外动作）。
+  GOTOOLCHAIN=auto go build -trimpath -o bin/agent-server ./cmd/server || { fail "编译 agent-server 失败"; exit 1; }
+  GOTOOLCHAIN=auto go build -trimpath -o bin/agent-scheduler ./cmd/scheduler || { fail "编译 agent-scheduler 失败"; exit 1; }
+  GOTOOLCHAIN=auto go build -trimpath -o bin/agent-supervisor ./cmd/supervisor || { fail "编译 agent-supervisor 失败"; exit 1; }
 fi
 
 # ── 4. 前端依赖 ──

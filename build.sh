@@ -43,13 +43,14 @@ cd "${ROOT_DIR}"
 
 echo "==> 编译后端二进制 ..."
 echo "  -> bin/agent-server"
-go build -trimpath -o "${BIN_DIR}/agent-server" ./cmd/server
+# GOTOOLCHAIN=auto：本机 Go 低于 go.mod 要求（1.25.5）时自动下载对应工具链。
+GOTOOLCHAIN=auto go build -trimpath -o "${BIN_DIR}/agent-server" ./cmd/server
 
 echo "  -> bin/agent-scheduler"
-go build -trimpath -o "${BIN_DIR}/agent-scheduler" ./cmd/scheduler
+GOTOOLCHAIN=auto go build -trimpath -o "${BIN_DIR}/agent-scheduler" ./cmd/scheduler
 
 echo "  -> bin/agent-supervisor"
-go build -trimpath -o "${BIN_DIR}/agent-supervisor" ./cmd/supervisor
+GOTOOLCHAIN=auto go build -trimpath -o "${BIN_DIR}/agent-supervisor" ./cmd/supervisor
 
 if ${BUILD_FRONTEND}; then
   echo "==> 编译前端 ..."
