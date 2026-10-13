@@ -25,6 +25,11 @@ has()  { command -v "$1" &>/dev/null; }
 
 echo "=== flowagent 一键启动 ==="
 
+# 把 install.sh 下载到 .tools 的便携运行时提上 PATH（本会话生效，对齐 install.bat）。
+[ -x "$ROOT/.tools/go/bin/go" ]          && export PATH="$ROOT/.tools/go/bin:$PATH"
+[ -x "$ROOT/.tools/node/bin/node" ]      && export PATH="$ROOT/.tools/node/bin:$PATH"
+[ -x "$ROOT/.tools/python/bin/python3" ] && export PATH="$ROOT/.tools/python/bin:$PATH"
+
 # ── 1. 运行时检查 ──
 if ! has go; then fail "未找到 Go，请先运行 bash install.sh"; exit 1; fi
 if ! has node; then fail "未找到 Node.js，请先运行 bash install.sh"; exit 1; fi
