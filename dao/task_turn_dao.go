@@ -8,9 +8,11 @@
 package dao
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/memory-overflow/flowagent/model"
@@ -671,9 +673,15 @@ func marshalTurnPayload(v interface{}) (string, error) {
 	if v == nil {
 		return "", nil
 	}
-	b, err := json.Marshal(v)
-	if err != nil {
+	// SetEscapeHTML(false)：保留 & < > 原样。json.Marshal 默认做 HTML 转义，
+	// 会把 run_command 参数里的 && 串联符落库成 \u0026\u0026 —— 执行不受影响
+	// （参数解析后仍是 &），但调试页显示的不是模型真实发送的命令，排查时误导。
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
 		return "", err
 	}
-	return string(b), nil
+	// Encode 相比 Marshal 会在结尾多一个换行，去掉保持输出形态一致。
+	return strings.TrimSuffix(buf.String(), "\n"), nil
 }
