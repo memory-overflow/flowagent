@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -84,12 +85,31 @@ func (m *BuiltinManifest) ServerConfig() *ServerConfig {
 	return &ServerConfig{
 		ServerName: m.Name,
 		Transport:  e.Transport,
-		Command:    e.Command,
+		Command:    normalizeCommand(e.Command),
 		Args:       e.Args,
 		Env:        envMapToSlice(e.Env),
 		URL:        e.URL,
 		Headers:    e.Headers,
 	}
+}
+
+// normalizeCommand 对内置清单的 command 做跨平台适配。
+//
+// 内置清单（如 fetch）的 command 写的是 Unix 相对路径 .venv/bin/python，
+// 而 Windows 上 venv 的可执行文件在 .venv\Scripts\python.exe。若不替换，
+// Windows 上启动 stdio 子进程会报「executable file not found」导致该 MCP 直接不可用。
+//
+// 仅作用于内置清单（BuiltinManifest.ServerConfig），用户自定义导入的 MCP
+// 配置不经过这里，不受影响。
+func normalizeCommand(cmd string) string {
+	if runtime.GOOS != "windows" {
+		return cmd
+	}
+	switch filepath.ToSlash(filepath.Clean(cmd)) {
+	case ".venv/bin/python", ".venv/bin/python3", ".venv/bin/pip":
+		return filepath.FromSlash(".venv/Scripts/" + filepath.Base(cmd) + ".exe")
+	}
+	return cmd
 }
 
 // LoadBuiltinServer 从内置清单目录加载指定 key 的 server 连接配置。
