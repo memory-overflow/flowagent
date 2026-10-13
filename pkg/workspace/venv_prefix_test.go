@@ -1,33 +1,49 @@
 package workspace
 
 import (
-	"strings"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
-// venv 激活前缀的跨平台约束：
-//   - 末尾绝不能是裸换行 —— cmd.exe 的命令行不接受 LF（换行只在 .bat 文件里
-//     有效），LF 之后的用户命令会被 cmd /c 整个丢弃，表现为「执行成功、无
-//     stdout 输出」而实际什么都没跑（Windows 线上真实踩坑）；
-//   - 因此 Windows 分支必须以 "& " 连接（cmd 的顺序执行符），Unix 分支的
-//     "\n" 在 sh -c 里多行合法、可以保留。
+// venvBinDirFor 的跨平台约束：
+//   - unix    → <root>/.venv/bin
+//   - windows → <root>/.venv/Scripts
+//   - 目录不存在 / projectRoot 为空 → 空串（调用方跳过 PATH 注入）
 //
-// 注意：本测试在任意平台跑都覆盖两个分支（直接查字符串形态，不依赖 GOOS）。
-func TestVenvActivatePrefixFormat(t *testing.T) {
-	const root = `C:\proj`
-	win := venvActivateForWindows(root)
-	if !strings.HasPrefix(win, "( if exist ") || !strings.Contains(win, "activate.bat") {
-		t.Errorf("windows 前缀形态不符: %q", win)
-	}
-	if !strings.HasSuffix(win, " ) & ") {
-		t.Errorf("windows 前缀必须以 \") & \" 结尾（顺序连接用户命令），got %q", win)
-	}
-	if strings.ContainsAny(win, "\n\r") {
-		t.Errorf("windows 前缀不能含换行符（cmd 命令行不接受 LF）: %q", win)
-	}
+// 在任意平台都能覆盖两个分支（GOOS 走参数注入，目录用临时目录真实构造）。
+func TestVenvBinDirFor(t *testing.T) {
+	t.Run("unix layout", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, ".venv", "bin"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		got := venvBinDirFor("darwin", root)
+		if got != filepath.Join(root, ".venv", "bin") {
+			t.Errorf("unix 分支应返回 .venv/bin，got %q", got)
+		}
+		if venvBinDirFor("windows", root) != "" {
+			t.Error("windows 分支在 unix 布局下应返回空串（Scripts 不存在）")
+		}
+	})
 
-	unix := venvActivateForUnix("/proj")
-	if !strings.HasPrefix(unix, "[ -f ") || !strings.HasSuffix(unix, "\n") {
-		t.Errorf("unix 前缀形态不符: %q", unix)
-	}
+	t.Run("windows layout", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, ".venv", "Scripts"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		got := venvBinDirFor("windows", root)
+		if got != filepath.Join(root, ".venv", "Scripts") {
+			t.Errorf("windows 分支应返回 .venv/Scripts，got %q", got)
+		}
+	})
+
+	t.Run("missing venv", func(t *testing.T) {
+		if got := venvBinDirFor("darwin", t.TempDir()); got != "" {
+			t.Errorf("venv 不存在应返回空串，got %q", got)
+		}
+		if got := venvBinDirFor("darwin", ""); got != "" {
+			t.Errorf("projectRoot 为空应返回空串，got %q", got)
+		}
+	})
 }

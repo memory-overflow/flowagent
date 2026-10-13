@@ -131,28 +131,40 @@ func Execute(ctx context.Context, cfg *Config, input string) (string, error) {
 	defer cancel()
 
 	// shell 型 skill 按平台选择解释器：
-	//   - unix:    Command（如 /bin/sh）+ stdin 传入命令脚本（现状）；
+	//   - unix:    Command（如 /bin/sh）+ stdin 传入命令脚本；
 	//   - windows: 没有 sh，改用 cmd /c，命令通过参数传入（cmd 不读 stdin）。
 	command := cfg.Command
 	args := cfg.Args
 	stdinInput := input
 	useStdin := true
-	if isShellCommand(cfg) {
-		if runtime.GOOS == "windows" {
-			command = "cmd"
-			args = append([]string{"/c"}, cfg.Args...)
-			args = append(args, venvActivatePrefix()+input)
-			stdinInput = ""
-			useStdin = false
-		} else {
-			stdinInput = venvActivatePrefix() + input
-		}
+	if isShellCommand(cfg) && runtime.GOOS == "windows" {
+		command = "cmd"
+		args = append([]string{"/c"}, cfg.Args...)
+		args = append(args, input)
+		useStdin = false
 	}
 
 	cmd := exec.CommandContext(execCtx, command, args...)
+
+	// 环境注入：cfg.Env + 项目 venv。shell skill 子进程 cwd = 项目根，把
+	// .venv 的可执行目录提到 PATH 最前（并设 VIRTUAL_ENV），子进程里的
+	// python / pip 即指向项目 venv。相比在命令前拼接激活脚本，PATH 注入
+	// 跨平台行为一致，也避开了 cmd /c 的引号/换行解析坑。
+	env := os.Environ()
 	if len(cfg.Env) > 0 {
-		cmd.Env = append(os.Environ(), cfg.Env...)
+		env = append(env, cfg.Env...)
 	}
+	if isShellCommand(cfg) {
+		if venvBin := venvBinDirFor(runtime.GOOS, "."); venvBin != "" {
+			if abs, aerr := filepath.Abs(venvBin); aerr == nil {
+				env = append(env,
+					"PATH="+abs+string(os.PathListSeparator)+os.Getenv("PATH"),
+					"VIRTUAL_ENV="+filepath.Dir(abs))
+			}
+		}
+	}
+	cmd.Env = env
+
 	if useStdin {
 		cmd.Stdin = strings.NewReader(stdinInput)
 	}
@@ -175,26 +187,23 @@ func Execute(ctx context.Context, cfg *Config, input string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// venvActivatePrefix 返回在 shell skill 执行前注入的 venv 激活命令（按平台）。
-//
-// 项目级 venv 存在时激活，让后续 python / python3 / pip 统一指向 venv；
-// 不存在时静默跳过。shell skill 子进程 cwd = 项目根，故用相对路径。
-//   - unix:    [ -f .venv/bin/activate ] && . .venv/bin/activate
-//   - windows: if exist .venv\Scripts\activate.bat call .venv\Scripts\activate.bat
-func venvActivatePrefix() string {
-	return venvActivatePrefixFor(runtime.GOOS)
-}
-
-// venvActivatePrefixFor 是 venvActivatePrefix 的可注入 GOOS 版本，便于测试覆盖 Windows 分支。
-func venvActivatePrefixFor(goos string) string {
-	if goos == "windows" {
-		// cmd.exe 命令行不接受 LF 换行（换行只在 .bat 文件里有效）：
-		// 若前缀以 "\n" 结尾，cmd /c 只执行第一行 if/call，后面的用户命令
-		// 会被整个丢弃。改用括号块 + & 顺序连接：.venv 不存在时块内无动作，
-		// & 后的用户命令无条件执行。
-		return "( if exist .venv\\Scripts\\activate.bat call .venv\\Scripts\\activate.bat ) & "
+// venvBinDirFor 返回项目 venv 的可执行目录（相对 projectRoot；shell skill
+// 子进程 cwd = 项目根，传 "." 即可）：unix 为 .venv/bin，windows 为
+// .venv\Scripts；目录不存在返回空串。调用方把它注入子进程 PATH（并设
+// VIRTUAL_ENV）即可让 python / pip 命中 venv —— 不再往命令行拼接激活脚本，
+// 规避 cmd /c 的引号与换行解析坑。可注入 GOOS 便于测试覆盖两个分支。
+func venvBinDirFor(goos string, projectRoot string) string {
+	if strings.TrimSpace(projectRoot) == "" {
+		return ""
 	}
-	return "[ -f .venv/bin/activate ] && . .venv/bin/activate\n"
+	dir := filepath.Join(projectRoot, ".venv", "bin")
+	if goos == "windows" {
+		dir = filepath.Join(projectRoot, ".venv", "Scripts")
+	}
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		return ""
+	}
+	return dir
 }
 
 // isShellCommand 判断 command skill 是否为 shell 型（/bin/sh、sh、bash 等）。
@@ -343,6 +352,7 @@ func BuildPromptSection(skills []*Config) string {
 	var b strings.Builder
 	b.WriteString("【可用技能 (Skills)】\n")
 	b.WriteString("以下是当前对话已启用的技能。当用户需求匹配某个技能的适用场景时，请遵循该技能的指令来完成任务。\n")
+	b.WriteString("技能及其运行环境（CLI、Python 依赖、虚拟环境）均已由安装脚本预先装好，直接按指令调用即可；不要用命令去检查技能目录、确认依赖或虚拟环境是否安装。\n")
 
 	for _, s := range skills {
 		if s == nil {
