@@ -66,6 +66,9 @@ __pycache__/
 .venv/
 venv/
 
+# Windows install.bat 下载的可移植运行时（Go / Node.js / Python）
+.tools/
+
 # 用户自定义 skills（本地上传，不进仓库）
 skills/user/
 # go build 无 -o 时落在仓库根的包二进制（cmd/server、cmd/scheduler、cmd/supervisor）
