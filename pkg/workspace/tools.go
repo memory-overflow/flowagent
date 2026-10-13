@@ -157,6 +157,7 @@ func BuiltinTools() []*ToolDef {
 		listDirTool(),
 		createDirTool(),
 		fileExistsTool(),
+		editFileTool(),
 		runCommandTool(),
 		getCurrentTimeTool(),
 		deepSearchTool(),
@@ -417,6 +418,119 @@ func fileExistsTool() *ToolDef {
 			return "true", nil
 		},
 	}
+}
+
+// ============================================================
+// 5.5 edit_file
+// ============================================================
+
+// editFileTool 对工作区内已有文本文件做精确编辑。
+//
+// 为什么需要（区别于 write_file 整文件覆盖）：改几行就重写整个文件，
+// token 消耗大、且模型重写时容易「顺手」改错无关部分。精确编辑只动
+// 该动的地方，是主流 agent 框架的标准配置（参考 OpenHands 的
+// str_replace_editor、Claude Code 的 Edit）。
+//
+// 支持两种操作（command）：
+//   - str_replace：把 old_string 替换成 new_string
+//   - insert：在 anchor 之后插入 new_string；anchor 留空表示追加到文件末尾
+//
+// 两者都要求「匹配文本逐字符一致且恰好出现一次」：0 次报未找到，
+// 多次报不唯一（要求补上下文），从根上杜绝误替换。
+func editFileTool() *ToolDef {
+	return &ToolDef{
+		Name:        "edit_file",
+		Description: "对工作区内已有文本文件做精确编辑。command=str_replace：把 old_string 替换成 new_string（old_string 必须恰好出现一次）；command=insert：在 anchor 之后插入 new_string（anchor 必须恰好出现一次，anchor 留空表示追加到文件末尾）。匹配文本必须逐字符一致，出现 0 次或多次都会报错，请提供足够上下文保证唯一。",
+		InputSchema: objectSchema(map[string]interface{}{
+			"command":    strProp("操作类型：str_replace 或 insert"),
+			"path":       strProp("文件路径，相对工作区"),
+			"old_string": strProp("command=str_replace 必填：要被替换的原文"),
+			"anchor":     strProp("command=insert 必填：插入位置的锚点文本，新内容插在它之后；留空表示追加到文件末尾"),
+			"new_string": strProp("要写入的新内容（str_replace 的替换文本，或 insert 的插入文本）"),
+		}, []string{"command", "path"}),
+		Handler: func(ctx context.Context, wc *Context, args map[string]interface{}) (string, error) {
+			command := strArg(args, "command")
+			path := strArg(args, "path")
+			newStr := strArg(args, "new_string")
+			if strings.TrimSpace(path) == "" {
+				return "", fmt.Errorf("edit_file 缺少 path 参数")
+			}
+			abs, err := resolveIn(wc, path)
+			if err != nil {
+				return "", err
+			}
+			data, err := os.ReadFile(abs)
+			if err != nil {
+				return "", fmt.Errorf("读取文件失败: %w", err)
+			}
+			content := string(data)
+
+			// 定位「要操作的锚文本」，并按命令执行替换 / 插入。
+			var target, action string
+			switch command {
+			case "str_replace":
+				target = strArg(args, "old_string")
+				action = "替换"
+				if target == "" {
+					return "", fmt.Errorf("str_replace 需要 old_string 参数")
+				}
+			case "insert":
+				target = strArg(args, "anchor")
+				action = "插入"
+			default:
+				return "", fmt.Errorf("edit_file 不支持的 command %q（只支持 str_replace / insert）", command)
+			}
+
+			var updated string
+			if command == "insert" && target == "" {
+				// anchor 留空：追加到文件末尾
+				updated = content + newStr
+			} else {
+				// 唯一性校验：0 次未找到，多次不唯一。
+				if n := strings.Count(content, target); n == 0 {
+					return "", fmt.Errorf("未在文件中找到要%s的文本，请先 read_file 确认内容", action)
+				} else if n > 1 {
+					return "", fmt.Errorf("要%s的文本出现了 %d 次，不唯一，请补充更多上下文使其唯一", action, n)
+				}
+				if command == "str_replace" {
+					updated = strings.Replace(content, target, newStr, 1)
+				} else {
+					updated = strings.Replace(content, target, target+newStr, 1)
+				}
+			}
+
+			if err := os.WriteFile(abs, []byte(updated), 0o644); err != nil {
+				return "", fmt.Errorf("写入文件失败: %w", err)
+			}
+
+			// 返回改动点附近的上下文，让模型确认改对了。
+			marker := newStr
+			if command == "insert" && target != "" {
+				marker = target + newStr
+			}
+			return fmt.Sprintf("已在 %s 中%s成功，改动点附近内容：\n%s", path, action, editSnippet(updated, marker)), nil
+		},
+	}
+}
+
+// editSnippet 提取 marker 在 content 中所在位置附近的一小段文本，供模型确认改动。
+func editSnippet(content, marker string) string {
+	if marker == "" {
+		return "  (空内容)"
+	}
+	idx := strings.Index(content, marker)
+	if idx < 0 {
+		return "  (未定位到改动点)"
+	}
+	lo := idx - 80
+	if lo < 0 {
+		lo = 0
+	}
+	hi := idx + len(marker) + 80
+	if hi > len(content) {
+		hi = len(content)
+	}
+	return "  ...\n  " + strings.ReplaceAll(strings.TrimSpace(content[lo:hi]), "\n", "\n  ") + "\n  ..."
 }
 
 // ============================================================
