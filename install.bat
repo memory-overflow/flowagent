@@ -119,6 +119,11 @@ if errorlevel 1 (
     echo   [FAIL] build agent-scheduler failed
     exit /b 1
 )
+call :go_build ./cmd/supervisor bin\agent-supervisor.exe
+if errorlevel 1 (
+    echo   [FAIL] build agent-supervisor failed
+    exit /b 1
+)
 echo   [OK] backend built
 
 REM --- 6. Frontend deps ---

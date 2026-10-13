@@ -2,8 +2,9 @@
 REM ============================================================================
 REM flowagent one-command launcher (Windows)
 REM
-REM Launches three windows:
-REM   agent-server (HTTP API) + agent-scheduler + frontend (vite dev)
+REM Launches two windows:
+REM   agent-supervisor (hosts agent-server + agent-scheduler, auto-restart on
+REM   exit, escape-restart endpoint :9090) + frontend (vite dev)
 REM
 REM Usage: start.bat
 REM Prereq: run install.bat first; config\config.yaml is configured.
@@ -65,11 +66,12 @@ if not exist config\config.yaml (
 )
 
 REM --- 3. Build if missing ---
-if not exist bin\agent-server.exe (
+if not exist bin\agent-supervisor.exe (
     echo Building backend...
     if not exist bin mkdir bin
     go build -trimpath -o bin\agent-server.exe ./cmd/server
     go build -trimpath -o bin\agent-scheduler.exe ./cmd/scheduler
+    go build -trimpath -o bin\agent-supervisor.exe ./cmd/supervisor
 )
 
 REM --- 4. Frontend deps ---
@@ -80,10 +82,9 @@ if not exist frontend\node_modules (
     cd ..
 )
 
-REM --- 5. Launch three windows ---
-echo Launching agent-server, agent-scheduler and frontend...
-start "flowagent-server" cmd /k "bin\agent-server.exe -config config\config.yaml"
-start "flowagent-scheduler" cmd /k "bin\agent-scheduler.exe -config config\config.yaml"
+REM --- 5. Launch supervisor + frontend ---
+echo Launching supervisor (server + scheduler) and frontend...
+start "flowagent-supervisor" cmd /k "bin\agent-supervisor.exe -config config\config.yaml"
 start "flowagent-frontend" cmd /k "cd frontend && npm run dev"
 
 echo Done. Close each window to stop the corresponding process.
