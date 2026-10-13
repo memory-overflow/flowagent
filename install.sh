@@ -268,6 +268,9 @@ fi
 # ── 5. 编译后端 ──
 step "5. 编译后端（bin/agent-server + bin/agent-scheduler）"
 mkdir -p bin
+# 国内直连 proxy.golang.org 极慢或被墙（go: downloading 长期无进展且不报错），
+# 未显式设置 GOPROXY 时默认走 goproxy.cn 优先的代理链（海外可正常回退）。
+export GOPROXY="${GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}"
 # GOTOOLCHAIN=auto：本机 Go 低于 go.mod 要求时自动下载对应工具链（此处用 .tools 的
 # Go 已保证版本，通常无需额外下载；保留该前缀兜底 GOTOOLCHAIN=local 的环境）。
 GOTOOLCHAIN=auto go build -trimpath -o bin/agent-server ./cmd/server && ok "bin/agent-server"

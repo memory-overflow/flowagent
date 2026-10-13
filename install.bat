@@ -420,15 +420,12 @@ if not exist "!TOOLS_DIR!\python\python.exe" (
 exit /b 0
 
 REM ---------------------------------------------------------------------------
-REM  go build with a China proxy fallback
+REM  go build with a default GOPROXY chain (China-friendly)
 REM ---------------------------------------------------------------------------
 :go_build
+REM 直连 proxy.golang.org 在国内极慢或被墙 —— 表现为 go: downloading 长时间
+REM 无进展且不报错，「失败后重试」的逻辑永远不会触发。因此用户未显式设置
+REM GOPROXY 时，默认走 goproxy.cn 优先的代理链（国内快，海外可正常回退）。
+if not defined GOPROXY set "GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct"
 go build -trimpath -o "%~2" %~1
-if !errorlevel! EQU 0 exit /b 0
-if not defined GOPROXY (
-    echo   [--] go build failed, retrying with GOPROXY=https://goproxy.cn,direct
-    set "GOPROXY=https://goproxy.cn,direct"
-    go build -trimpath -o "%~2" %~1
-    if !errorlevel! EQU 0 exit /b 0
-)
-exit /b 1
+exit /b %errorlevel%

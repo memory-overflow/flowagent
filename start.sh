@@ -45,6 +45,8 @@ fi
 if [ ! -x bin/agent-server ] || [ ! -x bin/agent-scheduler ] || [ ! -x bin/agent-supervisor ]; then
   echo "编译后端..."
   mkdir -p bin
+  # 国内直连 proxy.golang.org 极慢或被墙，未显式设置 GOPROXY 时默认 goproxy.cn 优先。
+  export GOPROXY="${GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}"
   # GOTOOLCHAIN=auto：本机 Go 低于 go.mod 要求（1.25.5）时自动下载对应工具链，
   # 覆盖 GOTOOLCHAIN=local/off 的环境（Go 已 >= 1.25 时该变量无任何额外动作）。
   GOTOOLCHAIN=auto go build -trimpath -o bin/agent-server ./cmd/server || { fail "编译 agent-server 失败"; exit 1; }

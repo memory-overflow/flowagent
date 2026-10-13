@@ -69,6 +69,7 @@ REM --- 3. Build if missing ---
 if not exist bin\agent-supervisor.exe (
     echo Building backend...
     if not exist bin mkdir bin
+    if not defined GOPROXY set "GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct"
     go build -trimpath -o bin\agent-server.exe ./cmd/server
     go build -trimpath -o bin\agent-scheduler.exe ./cmd/scheduler
     go build -trimpath -o bin\agent-supervisor.exe ./cmd/supervisor

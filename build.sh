@@ -42,6 +42,8 @@ mkdir -p "${BIN_DIR}"
 cd "${ROOT_DIR}"
 
 echo "==> 编译后端二进制 ..."
+# 国内直连 proxy.golang.org 极慢或被墙，未显式设置 GOPROXY 时默认 goproxy.cn 优先。
+export GOPROXY="${GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}"
 echo "  -> bin/agent-server"
 # GOTOOLCHAIN=auto：本机 Go 低于 go.mod 要求（1.25.5）时自动下载对应工具链。
 GOTOOLCHAIN=auto go build -trimpath -o "${BIN_DIR}/agent-server" ./cmd/server
