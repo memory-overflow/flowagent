@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -129,18 +130,32 @@ func Execute(ctx context.Context, cfg *Config, input string) (string, error) {
 	execCtx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(execCtx, cfg.Command, cfg.Args...)
+	// shell 型 skill 按平台选择解释器：
+	//   - unix:    Command（如 /bin/sh）+ stdin 传入命令脚本（现状）；
+	//   - windows: 没有 sh，改用 cmd /c，命令通过参数传入（cmd 不读 stdin）。
+	command := cfg.Command
+	args := cfg.Args
+	stdinInput := input
+	useStdin := true
+	if isShellCommand(cfg) {
+		if runtime.GOOS == "windows" {
+			command = "cmd"
+			args = append([]string{"/c"}, cfg.Args...)
+			args = append(args, venvActivatePrefix()+input)
+			stdinInput = ""
+			useStdin = false
+		} else {
+			stdinInput = venvActivatePrefix() + input
+		}
+	}
+
+	cmd := exec.CommandContext(execCtx, command, args...)
 	if len(cfg.Env) > 0 {
 		cmd.Env = append(os.Environ(), cfg.Env...)
 	}
-	// 激活项目级 venv：shell skill 执行命令前先 source .venv/bin/activate，
-	// 让 python / python3 / pip 统一指向项目 venv（不污染本机 python）。
-	// 仅对 shell 型 command skill 生效（其 stdin 是待执行的命令脚本）；
-	// venv 不存在时静默跳过（&& 短路，不影响原有命令执行）。
-	if isShellCommand(cfg) {
-		input = venvActivatePrefix + input
+	if useStdin {
+		cmd.Stdin = strings.NewReader(stdinInput)
 	}
-	cmd.Stdin = strings.NewReader(input)
 
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -160,12 +175,18 @@ func Execute(ctx context.Context, cfg *Config, input string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// venvActivatePrefix 在 shell skill 执行前注入的 venv 激活命令。
+// venvActivatePrefix 返回在 shell skill 执行前注入的 venv 激活命令（按平台）。
 //
-// 项目级 venv（.venv）存在时 source 其 activate 脚本，让后续 python /
-// python3 / pip 统一指向 venv；不存在时静默跳过（&& 短路）。
-// shell skill 子进程 cwd = 项目根，故用相对路径 .venv/bin/activate。
-const venvActivatePrefix = "[ -f .venv/bin/activate ] && . .venv/bin/activate\n"
+// 项目级 venv 存在时激活，让后续 python / python3 / pip 统一指向 venv；
+// 不存在时静默跳过。shell skill 子进程 cwd = 项目根，故用相对路径。
+//   - unix:    [ -f .venv/bin/activate ] && . .venv/bin/activate
+//   - windows: if exist .venv\Scripts\activate.bat call .venv\Scripts\activate.bat
+func venvActivatePrefix() string {
+	if runtime.GOOS == "windows" {
+		return "if exist .venv\\Scripts\\activate.bat call .venv\\Scripts\\activate.bat\n"
+	}
+	return "[ -f .venv/bin/activate ] && . .venv/bin/activate\n"
+}
 
 // isShellCommand 判断 command skill 是否为 shell 型（/bin/sh、sh、bash 等）。
 // 只有 shell 型 skill 的 stdin 是待执行的命令脚本，需要注入 venv 激活；

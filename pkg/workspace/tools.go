@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -443,26 +444,58 @@ func resolveCommandTimeout(args map[string]interface{}) time.Duration {
 	return timeout
 }
 
+// shellCommand 返回当前平台用于执行「一段 shell 命令」的解释器与 -c 等价标志。
+//
+// Windows 用 cmd /c（无 sh）；linux/darwin 等用 sh -c。模型生成的命令文本
+// 必须与所选 shell 匹配 —— 平台信息通过 ShellHint 注入 system prompt（见下）。
+func shellCommand() (name, flag string) {
+	if runtime.GOOS == "windows" {
+		return "cmd", "/c"
+	}
+	return "sh", "-c"
+}
+
+// ShellHint 返回注入 system prompt 的「当前运行环境」提示，让模型生成对应
+// 平台的命令（cmd 与 sh 的语法差异很大：dir/ls、type/cat、copy/cp、del/rm）。
+// 由 actuator 层在执行期与规划期分别注入。
+func ShellHint() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "当前运行环境是 Windows，请在 run_command / shell 等工具里使用 Windows cmd 兼容的命令（例如 dir、type、copy、del、mkdir，而不是 ls、cat、cp、rm、chmod），路径用反斜杠 \\。"
+	case "darwin":
+		return "当前运行环境是 macOS，请使用 Unix shell 兼容的命令（bash/zsh，例如 ls、cat、cp、rm）。"
+	default:
+		return "当前运行环境是 Linux，请使用 Unix shell 兼容的命令（bash/sh，例如 ls、cat、cp、rm）。"
+	}
+}
+
 // venvActivateFor 生成在 shell 命令前注入的 venv 激活片段。
 //
-// projectRoot 为项目根绝对路径，据此定位 <projectRoot>/.venv/bin/activate。
-// 用 shell 条件判断：venv 存在才 source，不存在则静默跳过（&& 短路）。
+// projectRoot 为项目根绝对路径，据此定位 venv 的 activate 脚本：
+//   - unix:    <projectRoot>/.venv/bin/activate，用 [ -f ] && source 激活；
+//   - windows: <projectRoot>/.venv/Scripts/activate.bat，用 if exist call 激活。
+//
 // 返回空串表示 projectRoot 为空（不激活）。
 func venvActivateFor(projectRoot string) string {
 	if strings.TrimSpace(projectRoot) == "" {
 		return ""
+	}
+	if runtime.GOOS == "windows" {
+		activate := filepath.Join(projectRoot, ".venv", "Scripts", "activate.bat")
+		return "if exist \"" + activate + "\" call \"" + activate + "\"\n"
 	}
 	activate := filepath.Join(projectRoot, ".venv", "bin", "activate")
 	return "[ -f \"" + activate + "\" ] && . \"" + activate + "\"\n"
 }
 
 func runCommandTool() *ToolDef {
+	shellName, shellFlag := shellCommand()
 	return &ToolDef{
 		Name: "run_command",
-		Description: fmt.Sprintf("在工作区目录内执行一条 shell 命令（sh -c），返回 stdout。适合编译、运行脚本、git 等。危险删除命令会被拦截。"+
+		Description: fmt.Sprintf("在工作区目录内执行一条 shell 命令（%s %s），返回 stdout。适合编译、运行脚本、git 等。危险删除命令会被拦截。"+
 			"可选 timeout_seconds 指定超时（默认 %d 秒，上限 %d 秒）：预计耗时较长的命令"+
 			"（全盘搜索、全量编译、大批量文件处理）请主动放宽，否则会被默认超时打断。",
-			int(DefaultTimeout.Seconds()), int(maxCommandTimeout.Seconds())),
+			shellName, shellFlag, int(DefaultTimeout.Seconds()), int(maxCommandTimeout.Seconds())),
 		InputSchema: objectSchema(map[string]interface{}{
 			"cmd": strProp("要执行的 shell 命令，工作目录为当前任务的工作区"),
 			"timeout_seconds": map[string]interface{}{
@@ -500,12 +533,13 @@ func runCommandTool() *ToolDef {
 			execCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
-			// 不用 exec.CommandContext：它只 kill 直接子进程 sh，而 sh fork 出的
+			// 不用 exec.CommandContext：它只 kill 直接子进程，而 shell fork 出的
 			// 孙进程（管道里的 find/head、后台任务）会活下来并继续持有 stdout
 			// pipe 写端，导致下面的 Wait 一直等不到 EOF、超时形同虚设
 			// （实测 ctx=2s 的 `sh -c "sleep 15 & wait"` 要 15s 才返回）。
 			// 改为自己起进程组 + select 等超时 + kill 整组。
-			ec := exec.Command("sh", "-c", cmd)
+			shellName, shellFlag := shellCommand()
+			ec := exec.Command(shellName, shellFlag, cmd)
 			ec.Dir = wc.WorkspaceDir
 			stdout := newLimitedBuffer(maxCommandOutputBytes)
 			stderr := newLimitedBuffer(maxCommandOutputBytes)

@@ -498,7 +498,7 @@ func workflowSubTaskExecImpl(ctx context.Context, temp *model.TaskTemp) (data in
 
 // executingSystemPrompt 执行期 system prompt：通用 agent 人格 + 图片理解策略 + 对话已启用 skill。
 func executingSystemPrompt(ctx context.Context, chatID string) string {
-	systemPrompt := funcCallSystemPrompt + "\n\n" + imagePolicySection(ctx, chatID, nil)
+	systemPrompt := funcCallSystemPrompt + "\n\n" + workspacepkg.ShellHint() + "\n\n" + imagePolicySection(ctx, chatID, nil)
 	if skillConfigs, sErr := funcCallRegistry.toolProvider.LoadSkills(ctx, chatID); sErr != nil {
 		log.Printf("[func-call-actuator] load skills failed (ignore): %v", sErr)
 	} else if section := skillpkg.BuildPromptSection(skillConfigs); section != "" {
