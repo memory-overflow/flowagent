@@ -476,14 +476,32 @@ func ShellHint() string {
 //   - windows: <projectRoot>/.venv/Scripts/activate.bat，用 if exist call 激活。
 //
 // 返回空串表示 projectRoot 为空（不激活）。
+// venvActivateFor 按 GOOS 返回激活前缀（平台实现见 venvActivateForWindows / venvActivateForUnix）。
 func venvActivateFor(projectRoot string) string {
 	if strings.TrimSpace(projectRoot) == "" {
 		return ""
 	}
 	if runtime.GOOS == "windows" {
-		activate := filepath.Join(projectRoot, ".venv", "Scripts", "activate.bat")
-		return "if exist \"" + activate + "\" call \"" + activate + "\"\n"
+		return venvActivateForWindows(projectRoot)
 	}
+	return venvActivateForUnix(projectRoot)
+}
+
+// venvActivateForWindows 拼激活前缀。
+func venvActivateForWindows(projectRoot string) string {
+	activate := filepath.Join(projectRoot, ".venv", "Scripts", "activate.bat")
+	// cmd.exe 的命令行不接受 LF 换行（换行只在 .bat 文件里有效）：
+	// 若前缀以 "\n" 结尾，cmd /c 只执行第一行 if/call，后面的用户命令
+	// 会被整个丢弃，表现为「命令执行成功，无 stdout 输出」而实际什么
+	// 都没跑。改用括号块 + & 顺序连接：.venv 不存在时 if 为假、块内
+	// 无动作，& 后的用户命令无条件执行；存在时 activate.bat 在同一
+	// cmd 进程内激活（PATH 修改对后续命令生效）。
+	return "( if exist \"" + activate + "\" call \"" + activate + "\" ) & "
+}
+
+// venvActivateForUnix 拼激活前缀。末尾 "\n" 在 sh -c 里是合法的多行分隔，
+// 用户命令另起一行执行。
+func venvActivateForUnix(projectRoot string) string {
 	activate := filepath.Join(projectRoot, ".venv", "bin", "activate")
 	return "[ -f \"" + activate + "\" ] && . \"" + activate + "\"\n"
 }

@@ -182,8 +182,17 @@ func Execute(ctx context.Context, cfg *Config, input string) (string, error) {
 //   - unix:    [ -f .venv/bin/activate ] && . .venv/bin/activate
 //   - windows: if exist .venv\Scripts\activate.bat call .venv\Scripts\activate.bat
 func venvActivatePrefix() string {
-	if runtime.GOOS == "windows" {
-		return "if exist .venv\\Scripts\\activate.bat call .venv\\Scripts\\activate.bat\n"
+	return venvActivatePrefixFor(runtime.GOOS)
+}
+
+// venvActivatePrefixFor 是 venvActivatePrefix 的可注入 GOOS 版本，便于测试覆盖 Windows 分支。
+func venvActivatePrefixFor(goos string) string {
+	if goos == "windows" {
+		// cmd.exe 命令行不接受 LF 换行（换行只在 .bat 文件里有效）：
+		// 若前缀以 "\n" 结尾，cmd /c 只执行第一行 if/call，后面的用户命令
+		// 会被整个丢弃。改用括号块 + & 顺序连接：.venv 不存在时块内无动作，
+		// & 后的用户命令无条件执行。
+		return "( if exist .venv\\Scripts\\activate.bat call .venv\\Scripts\\activate.bat ) & "
 	}
 	return "[ -f .venv/bin/activate ] && . .venv/bin/activate\n"
 }
