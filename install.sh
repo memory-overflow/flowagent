@@ -110,20 +110,53 @@ ensure_go() {
 # ============================================================================
 #  Node.js
 # ============================================================================
+# install_node_via_nodesource 通过 NodeSource 官方脚本配置源并安装新版 Node.js。
+# 仅 Debian/Ubuntu(apt) 与 RHEL/CentOS(yum/dnf) 支持；macOS 用 brew 已是新版，不适用。
+# 失败返回 1（调用方回退到系统包管理器），不中断整个安装。
+install_node_via_nodesource() {
+  case "$PKG" in
+    apt) local url="https://deb.nodesource.com/setup_22.x" ;;
+    yum|dnf) local url="https://rpm.nodesource.com/setup_22.x" ;;
+    *) return 1 ;;
+  esac
+  has curl || { warn "未找到 curl，无法自动配 NodeSource"; return 1; }
+  echo "  配置 NodeSource 22.x 源（需 sudo，脚本来自 $url）..."
+  curl -fsSL "$url" | sudo -E bash - && pkg_install "nodejs"
+}
+
 ensure_node() {
-  if ! has node; then
-    echo "  [--] Node.js 未找到，用 $PKG 安装 ..."
-    pkg_install "nodejs" || { fail "Node.js 安装失败，请手动装 https://nodejs.org/"; MISSING=1; return; }
+  # 已有 node 且版本够 → 直接通过
+  if has node; then
+    local nv="$(node -v | sed 's/^v//')"
+    if ver_ge "$nv" "18.0.0"; then
+      ok "Node.js v$nv（满足 18+）"
+      return 0
+    fi
+    echo "  [--] Node.js v$nv 低于 18。"
+  else
+    echo "  [--] Node.js 未找到。"
   fi
 
+  # 缺失或版本老：macOS 用 brew；Linux 优先配 NodeSource 装新版（系统源里的 nodejs 常偏旧）。
+  if [ "$PKG" = "brew" ]; then
+    echo "  用 Homebrew 安装/升级 Node.js ..."
+    if has node; then brew upgrade node || brew reinstall node; else brew install node; fi \
+      || { fail "Node.js 安装失败"; MISSING=1; return; }
+  else
+    if ! install_node_via_nodesource; then
+      warn "NodeSource 配置失败，回退到系统包管理器安装 nodejs（版本可能仍偏旧）..."
+      pkg_install "nodejs" || { fail "Node.js 安装失败，请手动装 https://nodejs.org/"; MISSING=1; return; }
+    fi
+  fi
+
+  # 最终校验版本
   local nv="$(node -v | sed 's/^v//')"
   if ver_ge "$nv" "18.0.0"; then
     ok "Node.js v$nv（满足 18+）"
   else
-    fail "Node.js v$nv 低于 18"
-    echo "  macOS: brew install node"
-    echo "  Linux: 系统源里的 nodejs 常偏旧，建议用 NodeSource 装新版："
-    echo "         https://github.com/nodesource/distributions"
+    fail "Node.js v$nv 仍低于 18"
+    echo "  macOS: brew upgrade node"
+    echo "  Linux: 手动配 NodeSource 后重装：https://github.com/nodesource/distributions"
     MISSING=1
   fi
 }
