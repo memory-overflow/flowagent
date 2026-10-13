@@ -28,6 +28,15 @@ REM ============================================================================
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 
+REM Switch the console to UTF-8 BEFORE any non-ASCII line is parsed: this
+REM file contains Chinese comments (UTF-8). Without this, cmd decodes the
+REM file with the legacy ANSI codepage (GBK on Chinese Windows); the UTF-8
+REM comment bytes get mis-decoded and can break line parsing, surfacing as
+REM "'garbage' is not recognized as an internal or external command" around
+REM the build step. Same fix as pdfkit setup.bat. Note: no ">nul" here on
+REM purpose - this script avoids NUL redirection (see the NOTE above).
+chcp 65001
+
 set "ROOT=%~dp0"
 if "!ROOT:~-1!"=="\" set "ROOT=!ROOT:~0,-1!"
 set "TOOLS_DIR=!ROOT!\.tools"
@@ -144,23 +153,44 @@ REM --- 7. Project venv ---
 echo.
 echo [7/8] Create project venv ^(.venv + base libs^)
 set "PYOK="
-for /f "tokens=1,2" %%a in ('python --version 2^>^&1') do if not defined PYOK if /i "%%a"=="Python" set "PYOK=%%b"
+REM Probe hardening: same as :ensure_python — require the version token to
+REM start with a digit so the Microsoft Store python stub ("Python was not
+REM found; ...") is not mistaken for a working interpreter.
+for /f "tokens=1,2" %%a in ('python --version 2^>^&1') do (
+    if not defined PYOK if /i "%%a"=="Python" (
+        echo %%b| findstr /r /c:"^[0-9]" >nul && set "PYOK=1"
+    )
+)
 if defined PYOK (
     if not exist .venv\Scripts\python.exe (
         python -m venv .venv
+        if errorlevel 1 (
+            echo   [FAIL] python -m venv .venv failed - see output above
+            exit /b 1
+        )
         echo   [OK] .venv created
     ) else (
         echo   [OK] .venv already exists
     )
     if not exist .venv\Scripts\python3.exe (
         copy /y .venv\Scripts\python.exe .venv\Scripts\python3.exe
+        if errorlevel 1 (
+            echo   [FAIL] copy python.exe to python3.exe failed - .venv is broken
+            exit /b 1
+        )
         echo   [OK] python3.exe created
+    ) else (
+        echo   [OK] python3.exe already exists
     )
     .venv\Scripts\pip.exe install -r requirements-base.txt
+    if errorlevel 1 (
+        echo   [FAIL] pip install requirements-base.txt failed
+        exit /b 1
+    )
     echo   [OK] base libs installed
     .venv\Scripts\pip.exe list --format=freeze | findstr /I /B "requests== httpx== beautifulsoup4== lxml== PyYAML== pandas== openpyxl== python-dotenv== python-dateutil=="
 ) else (
-    echo   [WARN] Python not found, skip project venv
+    echo   [WARN] Python not found or is the Microsoft Store stub, skip project venv
 )
 
 REM --- 8. Skills runtime deps ---
@@ -376,7 +406,19 @@ REM ---------------------------------------------------------------------------
 if "!FORCE_TOOLS!"=="1" goto :python_install
 
 set "PV="
-for /f "tokens=1,2" %%a in ('python --version 2^>^&1') do if not defined PV if /i "%%a"=="Python" set "PV=%%b"
+REM Probe hardening: the Microsoft Store python stub (App execution aliases)
+REM answers ANY argument with "Python was not found; ...". Its first token is
+REM literally "Python", so matching on the first token alone mistakes the
+REM error message for a version ("PV=was"), which then passes ver_ge's
+REM string comparison against "3.10.0" — skipping the portable install and
+REM faking every later [OK] in the venv step. Require the version token to
+REM start with a digit; "was" fails that check and we fall through to the
+REM portable install below.
+for /f "tokens=1,2" %%a in ('python --version 2^>^&1') do (
+    if not defined PV if /i "%%a"=="Python" (
+        echo %%b| findstr /r /c:"^[0-9]" >nul && set "PV=%%b"
+    )
+)
 if defined PV (
     call :ver_ge "!PV!" "3.10.0"
     if !errorlevel! EQU 0 (
