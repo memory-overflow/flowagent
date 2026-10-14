@@ -83,7 +83,7 @@ export const zh = {
   welcome: {
     title: 'Workflow Agent',
     desc:
-      '通用工作流 Agent 平台。支持单 Agent 对话和 DAG 工作流编排，通过 MCP 协议接入外部工具，让 AI 完成复杂任务。',
+      '通用工作流 Agent 平台。自动编排任务为 DAG 工作流并执行，也支持单 Agent 对话；通过 MCP + Skills 接入外部技能，让 AI 完成复杂任务。',
     newChat: '新建对话',
     createFailed: '创建对话失败: {msg}',
   },

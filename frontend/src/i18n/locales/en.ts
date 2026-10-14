@@ -77,7 +77,7 @@ export const en = {
   welcome: {
     title: 'Workflow Agent',
     desc:
-      'A general-purpose workflow agent platform. Run single-agent conversations or DAG workflow orchestration, plug in external tools over MCP, and let AI finish complex tasks.',
+      'A general-purpose workflow agent platform. Automatically orchestrates tasks into DAG workflows and executes them, also supports single-agent conversations; plugs in external skills via MCP + Skills, letting AI finish complex tasks.',
     newChat: 'New chat',
     createFailed: 'Failed to create conversation: {msg}',
   },
