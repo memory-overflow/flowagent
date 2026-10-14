@@ -728,6 +728,17 @@ export function importSkillZip(file: File, overwrite: boolean) {
   });
 }
 
+/** 单个 SKILL.md 文件导入为 prompt 型 skill */
+export function importSkillMD(file: File, overwrite: boolean) {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('overwrite', String(overwrite));
+  return http.post<CommonResponse<SkillZipImportResult>>('/skills/import-md', form, {
+    headers: { 'Content-Type': undefined as unknown as string },
+    timeout: 30000,
+  });
+}
+
 // ============================================================
 // 任务流式订阅（SSE）
 // ============================================================

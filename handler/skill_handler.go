@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -599,4 +600,112 @@ func ImportSkillZip(c *gin.Context) {
 		reqID, result.Total, result.TotalFiles)
 
 	c.JSON(http.StatusOK, CommonResponse{Code: 0, Msg: "ok", ReqID: reqID, Data: result})
+}
+
+// ImportSkillMD 接收单个 SKILL.md 文件（multipart），解析为 prompt 型 skill。
+//
+// 与 ImportSkillZip 的「社区 SKILL.md 单包」等价，省去打包 zip：直接上传一个
+// .md（YAML frontmatter: name/description + 正文）即可导入。
+//
+// 表单字段：file（.md 文件）、overwrite（"true"/"1" 时同名覆盖）。
+func ImportSkillMD(c *gin.Context) {
+	reqID := ensureReqID(c)
+
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "缺少 file 字段: "+err.Error(), reqID)
+		return
+	}
+	overwrite := c.PostForm("overwrite") == "true" || c.PostForm("overwrite") == "1"
+
+	src, err := fileHeader.Open()
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "读取上传文件失败: "+err.Error(), reqID)
+		return
+	}
+	defer src.Close()
+	data, err := io.ReadAll(io.LimitReader(src, 1<<20)) // 单文件 1MB 上限
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "读取文件内容失败: "+err.Error(), reqID)
+		return
+	}
+
+	name, desc, body, key, err := pkgskill.ParseSkillMarkdown(string(data))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err.Error(), reqID)
+		return
+	}
+
+	// 落地 SKILL.md 到 skills/user/<key>/（与 zip 导入同目录）
+	dir := filepath.Join(skillsRootDir(), key)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		writeError(c, http.StatusInternalServerError, "创建 skill 目录失败: "+err.Error(), reqID)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), data, 0o644); err != nil {
+		writeError(c, http.StatusInternalServerError, "写入 SKILL.md 失败: "+err.Error(), reqID)
+		return
+	}
+	// ${CODEBUDDY_SKILL_DIR} 替换（与 zip 导入一致，见 mergeSkillPack）
+	content := strings.ReplaceAll(body, "${CODEBUDDY_SKILL_DIR}", pkgskill.UserSkillsRelDir+"/"+key)
+
+	// 写 skill 表（prompt 型）
+	skillDAO := &dao.SkillDAO{}
+	existing, err := skillDAO.ListSkills(c.Request.Context(), "")
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "查询已有 Skill 失败: "+err.Error(), reqID)
+		return
+	}
+	var old *model.Skill
+	for _, s := range existing {
+		if s.Name == name {
+			old = s
+			break
+		}
+	}
+
+	now := time.Now()
+	action := "created"
+	var saved *model.Skill
+	if old != nil {
+		if !overwrite {
+			c.JSON(http.StatusOK, CommonResponse{Code: 0, Msg: "ok", ReqID: reqID, Data: &SkillZipImportResult{
+				Skills: []*SkillZipImportItem{{Skill: buildSkillItem(old), Key: key, Action: "skipped"}},
+				Total:  1,
+			}})
+			return
+		}
+		updates := map[string]interface{}{
+			"description":  desc,
+			"type":         model.SkillTypePrompt,
+			"content":      content,
+			"updated_time": now,
+		}
+		if err := skillDAO.UpdateSkill(c.Request.Context(), old.ID, updates); err != nil {
+			writeError(c, http.StatusInternalServerError, "更新 Skill 失败: "+err.Error(), reqID)
+			return
+		}
+		saved, _ = skillDAO.GetSkillByID(c.Request.Context(), old.ID)
+		action = "updated"
+	} else {
+		saved = &model.Skill{
+			ID:          uuid.New().String(),
+			Name:        name,
+			Description: desc,
+			Type:        model.SkillTypePrompt,
+			Content:     content,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+		if err := skillDAO.CreateSkill(c.Request.Context(), saved); err != nil {
+			writeError(c, http.StatusInternalServerError, "创建 Skill 失败: "+err.Error(), reqID)
+			return
+		}
+	}
+
+	log.Printf("[skill-handler][%s] md imported: name=%s key=%s action=%s", reqID, name, key, action)
+	c.JSON(http.StatusOK, CommonResponse{Code: 0, Msg: "ok", ReqID: reqID, Data: &SkillZipImportResult{
+		Skills: []*SkillZipImportItem{{Skill: buildSkillItem(saved), Key: key, Action: action, ScriptsDir: dir}},
+		Total:  1,
+	}})
 }

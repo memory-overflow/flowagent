@@ -7,6 +7,7 @@ import {
   listBuiltinSkill,
   importBuiltinSkill,
   importSkillZip,
+  importSkillMD,
   type BuiltinSkillItem,
 } from '../services/api';
 import type { SkillConfig, SkillType } from '../types/api';
@@ -213,15 +214,17 @@ function ImportSkillModal({
 
   const handleFile = async (file: File | undefined | null) => {
     if (!file || importing) return;
-    if (!file.name.toLowerCase().endsWith('.zip')) {
-      setError(t('skills.import.needZip'));
+    const isZip = file.name.toLowerCase().endsWith('.zip');
+    const isMD = file.name.toLowerCase().endsWith('.md');
+    if (!isZip && !isMD) {
+      setError(t('skills.import.needZipOrMd'));
       return;
     }
     setError('');
     setResult(null);
     setImporting(true);
     try {
-      const res = await importSkillZip(file, overwrite);
+      const res = isZip ? await importSkillZip(file, overwrite) : await importSkillMD(file, overwrite);
       setResult(res.data.data);
       onImported();
     } catch (e: any) {
@@ -261,7 +264,7 @@ function ImportSkillModal({
             <input
               ref={inputRef}
               type="file"
-              accept=".zip"
+              accept=".zip,.md"
               style={{ display: 'none' }}
               onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; handleFile(f); }}
             />

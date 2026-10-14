@@ -114,6 +114,8 @@ func RegisterRoutes(router *gin.RouterGroup) {
 		skill.POST("/import-builtins", Wrap(ImportBuiltinSkillBinder, ImportBuiltinSkill))
 		// zip 整体导入是 multipart（Wrap 走 JSON 绑定），与 files/upload 同理绕过 Wrap
 		skill.POST("/import-zip", ImportSkillZip)
+		// 单个 SKILL.md 文件导入（prompt 型 skill）
+		skill.POST("/import-md", ImportSkillMD)
 	}
 
 	// ========== 文件模块 ==========
