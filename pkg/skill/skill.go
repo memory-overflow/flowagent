@@ -333,7 +333,12 @@ func AbsolutizePaths(content, projectRoot string) string {
 		return content
 	}
 	root := filepath.Clean(projectRoot)
-	return strings.ReplaceAll(content, "skills/", root+"/skills/")
+	// 用系统分隔符拼前缀：之前硬编码 "/" 在 Windows 上会生成
+	// `C:\...\flowagent/skills/` 这种混合分隔符路径。模型照抄进命令后
+	// 看着像「模型自己拼装错了」，实则是这里拼错 —— 统一走 filepath.Join，
+	// Windows 下得到 `C:\...\flowagent\skills\`（干净的反斜杠前缀）。
+	prefix := filepath.Join(root, "skills") + string(filepath.Separator)
+	return strings.ReplaceAll(content, "skills/", prefix)
 }
 
 // ============================================================
