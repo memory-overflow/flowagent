@@ -25,7 +25,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/memory-overflow/flowagent/dao"
 	"github.com/memory-overflow/flowagent/model"
@@ -519,9 +521,54 @@ func (p *toolProvider) LoadSkills(ctx context.Context, chatID string) ([]*skillp
 		if p.projectRoot != "" {
 			cfg.Content = skillpkg.AbsolutizePaths(cfg.Content, p.projectRoot)
 		}
+		// 社区 SKILL.md 惯用「相对 skill 落地目录」的路径（如 `scripts/calc_plan.py`），
+		// AbsolutizePaths 只认 skills/ 前缀，这类路径会原样进 prompt —— 模型解析
+		// 不了只能 `find /` 全盘搜，还会先命中 /tmp 里 zip 校验残留的同名文件，
+		// 拿错脚本位置。这里定位落地目录，注入根目录说明并绝对化。
+		if dir := locateSkillDir(p.projectRoot, cfg.Name); dir != "" {
+			cfg.Content = injectSkillDir(cfg.Content, dir)
+		}
 		configs = append(configs, cfg)
 	}
 	return configs, nil
+}
+
+// locateSkillDir 尝试定位 skill 的落地目录（绝对路径）。
+//
+// zip 导入的社区 skill 落在 skills/user/<name>/，内置导入落在 skills/<name>/；
+// DB 记录未存落地目录，用 name 作为 key 近似定位（zip 导入时二者一致）。
+// 都找不到返回空串（调用方跳过注入）。
+func locateSkillDir(projectRoot, name string) string {
+	if projectRoot == "" || strings.TrimSpace(name) == "" {
+		return ""
+	}
+	for _, rel := range []string{
+		filepath.Join("skills", "user", name),
+		filepath.Join("skills", name),
+	} {
+		dir := filepath.Join(projectRoot, rel)
+		if st, err := os.Stat(dir); err == nil && st.IsDir() {
+			return dir
+		}
+	}
+	return ""
+}
+
+// injectSkillDir 在 content 前注入「脚本根目录」说明行，并把 content 里
+// 反引号包裹的 skill 目录相对路径（`scripts/...`、`references/...`、
+// `assets/...`）替换成绝对路径。只动反引号内的路径引用，不误伤正文文本。
+func injectSkillDir(content, dir string) string {
+	if strings.TrimSpace(content) == "" || dir == "" {
+		return content
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "本技能文件根目录：%s\n（下文提到的 scripts/、references/、assets/ 等相对路径均相对此目录）\n\n", dir)
+	b.WriteString(content)
+	out := b.String()
+	for _, prefix := range []string{"scripts/", "references/", "assets/"} {
+		out = strings.ReplaceAll(out, "`"+prefix, "`"+dir+string(filepath.Separator)+prefix)
+	}
+	return out
 }
 
 // ============================================================

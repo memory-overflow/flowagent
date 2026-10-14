@@ -327,6 +327,12 @@ func listDirTool() *ToolDef {
 			}
 			entries, err := os.ReadDir(abs)
 			if err != nil {
+				if os.IsNotExist(err) {
+					// 工作区目录可能尚未创建（纯对话、从没上传过文件/产出过产物）。
+					// 返回空列表而不是报错 —— 报错会把模型推向「用 find / 自己找」，
+					// 全盘搜索又慢又容易命中 /tmp 里的同名残留。
+					return fmt.Sprintf("目录 %s 为空（工作区尚未创建任何文件）", path), nil
+				}
 				return "", fmt.Errorf("列出目录失败: %w", err)
 			}
 
