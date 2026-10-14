@@ -77,14 +77,19 @@ ok "前端启动 (pid $!) —— 地址见上方 vite 输出"
 
 # 前端起来后自动在浏览器打开 http://localhost:3000（vite 冷启动需数秒，
 # 后台轮询端口就绪再打开；打开失败不阻断启动，也不纳入 PIDS 由 Ctrl+C 管理）。
+# 用 localhost 探测（vite 默认监听 localhost，macOS 上可能只绑 IPv6 ::1，
+# 用 127.0.0.1 会探测不到）；while 而非 seq（seq 非跨平台必备），最长等 60 秒。
 (
-  for _ in $(seq 1 30); do
-    if curl -s -o /dev/null --max-time 1 http://127.0.0.1:3000 2>/dev/null; then
+  i=0
+  while [ "$i" -lt 60 ]; do
+    if curl -s -o /dev/null --max-time 1 http://localhost:3000 2>/dev/null; then
+      echo "  前端已就绪，正在打开浏览器 http://localhost:3000 ..."
       if has open; then open http://localhost:3000
       elif has xdg-open; then xdg-open http://localhost:3000
       fi
       break
     fi
+    i=$((i + 1))
     sleep 1
   done
 ) &
