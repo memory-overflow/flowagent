@@ -153,7 +153,7 @@ REM --- 7. Project venv ---
 echo.
 echo [7/8] Create project venv ^(.venv + base libs^)
 set "PYOK="
-REM Probe hardening: same as :ensure_python — require the version token to
+REM Probe hardening: same as :ensure_python - require the version token to
 REM start with a digit so the Microsoft Store python stub ("Python was not
 REM found; ...") is not mistaken for a working interpreter.
 for /f "tokens=1,2" %%a in ('python --version 2^>^&1') do (
@@ -286,6 +286,27 @@ for %%s in ("%~1") do if %%~zs GTR 200000 exit /b 0
 exit /b 1
 
 REM ---------------------------------------------------------------------------
+REM  download_gh <github-url> <dest>
+REM  Download a GitHub release asset. Direct github.com downloads crawl at
+REM  tens of KB/s from mainland China and python-build-standalone has no
+REM  official domestic mirror, so try well-known accelerator prefixes first
+REM  (each mirror serves the full github URL appended after its host) and
+REM  fall back to the direct download. Mirror availability drifts over time;
+REM  the direct fallback always works, just slowly.
+REM ---------------------------------------------------------------------------
+:download_gh
+set "GH_URL=%~1"
+set "GH_DEST=%~2"
+for %%p in ("https://ghfast.top/" "https://gh-proxy.com/" "https://ghproxy.net/") do (
+    echo   [--] trying mirror %%~p ...
+    call :download "%%~p!GH_URL!" "!GH_DEST!"
+    if not errorlevel 1 exit /b 0
+)
+echo   [--] all mirrors failed, falling back to direct download
+call :download "!GH_URL!" "!GH_DEST!"
+exit /b %errorlevel%
+
+REM ---------------------------------------------------------------------------
 REM  Go
 REM ---------------------------------------------------------------------------
 :ensure_go
@@ -321,7 +342,13 @@ exit /b 0
 
 :install_go
 call :detect_arch
-call :download "https://go.dev/dl/go%~1.windows-!GOARCH!.zip" "!TOOLS_DIR!\go.zip"
+REM npmmirror mirrors go.dev/dl in full and is fast in mainland China;
+REM the official source is the fallback when the mirror misses a release.
+call :download "https://npmmirror.com/mirrors/golang/go%~1.windows-!GOARCH!.zip" "!TOOLS_DIR!\go.zip"
+if errorlevel 1 (
+    echo   [--] mirror failed, falling back to go.dev
+    call :download "https://go.dev/dl/go%~1.windows-!GOARCH!.zip" "!TOOLS_DIR!\go.zip"
+)
 if errorlevel 1 exit /b 1
 if exist "!TOOLS_DIR!\go" rmdir /s /q "!TOOLS_DIR!\go"
 echo   Extracting ...
@@ -372,14 +399,22 @@ exit /b 0
 :install_node
 call :detect_arch
 echo   Resolving latest Node.js 22 LTS package ...
+REM npmmirror mirrors nodejs.org/dist in full; resolve+download there first,
+REM fall back to the official source when the mirror is unreachable.
+set "NODE_BASE=https://npmmirror.com/mirrors/node"
 set "NF="
-for /f "tokens=2" %%f in ('curl -s -L https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt ^| findstr /i win-!ARCH!.zip') do if not defined NF set "NF=%%f"
+for /f "tokens=2" %%f in ('curl -s -L !NODE_BASE!/latest-v22.x/SHASUMS256.txt ^| findstr /i win-!ARCH!.zip') do if not defined NF set "NF=%%f"
+if not defined NF (
+    echo   [--] npmmirror unreachable, falling back to nodejs.org
+    set "NODE_BASE=https://nodejs.org/dist"
+    for /f "tokens=2" %%f in ('curl -s -L https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt ^| findstr /i win-!ARCH!.zip') do if not defined NF set "NF=%%f"
+)
 if not defined NF (
     echo   [FAIL] cannot resolve the Node.js package name.
     exit /b 1
 )
 echo   Package: !NF!
-call :download "https://nodejs.org/dist/latest-v22.x/!NF!" "!TOOLS_DIR!\node.zip"
+call :download "!NODE_BASE!/latest-v22.x/!NF!" "!TOOLS_DIR!\node.zip"
 if errorlevel 1 exit /b 1
 if exist "!TOOLS_DIR!\node" rmdir /s /q "!TOOLS_DIR!\node"
 mkdir "!TOOLS_DIR!\node"
@@ -410,7 +445,7 @@ REM Probe hardening: the Microsoft Store python stub (App execution aliases)
 REM answers ANY argument with "Python was not found; ...". Its first token is
 REM literally "Python", so matching on the first token alone mistakes the
 REM error message for a version ("PV=was"), which then passes ver_ge's
-REM string comparison against "3.10.0" — skipping the portable install and
+REM string comparison against "3.10.0" - skipping the portable install and
 REM faking every later [OK] in the venv step. Require the version token to
 REM start with a digit; "was" fails that check and we fall through to the
 REM portable install below.
@@ -444,7 +479,7 @@ exit /b 0
 call :detect_arch
 set "PVER=3.13.13"
 set "PTAG=20260414"
-call :download "https://github.com/astral-sh/python-build-standalone/releases/download/!PTAG!/cpython-!PVER!+!PTAG!-!PBSARCH!-pc-windows-msvc-install_only.tar.gz" "!TOOLS_DIR!\python.tar.gz"
+call :download_gh "https://github.com/astral-sh/python-build-standalone/releases/download/!PTAG!/cpython-!PVER!+!PTAG!-!PBSARCH!-pc-windows-msvc-install_only.tar.gz" "!TOOLS_DIR!\python.tar.gz"
 if errorlevel 1 exit /b 1
 if exist "!TOOLS_DIR!\python" rmdir /s /q "!TOOLS_DIR!\python"
 mkdir "!TOOLS_DIR!\python"
@@ -459,15 +494,23 @@ if not exist "!TOOLS_DIR!\python\python.exe" (
     echo   [FAIL] extracting Python failed.
     exit /b 1
 )
+REM python-build-standalone ships only python.exe; alias python3.exe so
+REM `python3 ...` also resolves whenever .tools\python is on PATH.
+copy /y "!TOOLS_DIR!\python\python.exe" "!TOOLS_DIR!\python\python3.exe"
 exit /b 0
 
 REM ---------------------------------------------------------------------------
 REM  go build with a default GOPROXY chain (China-friendly)
 REM ---------------------------------------------------------------------------
 :go_build
-REM 直连 proxy.golang.org 在国内极慢或被墙 —— 表现为 go: downloading 长时间
-REM 无进展且不报错，「失败后重试」的逻辑永远不会触发。因此用户未显式设置
-REM GOPROXY 时，默认走 goproxy.cn 优先的代理链（国内快，海外可正常回退）。
+REM Keep this file pure ASCII: cmd's batch line parser mis-splits lines
+REM containing multi-byte characters (byte offset vs char count mismatch),
+REM turning comment tails into phantom commands even under chcp 65001.
+REM Direct access to proxy.golang.org is extremely slow or blocked in
+REM mainland China - "go: downloading" appears to hang without progress or
+REM errors, so retry-on-failure never fires. When GOPROXY is not explicitly
+REM set, default to a goproxy.cn-first chain (fast in China, graceful
+REM fallback overseas).
 if not defined GOPROXY set "GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct"
 go build -trimpath -o "%~2" %~1
 exit /b %errorlevel%
