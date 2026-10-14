@@ -3,10 +3,15 @@
 # flowagent 依赖安装脚本（Linux / macOS）
 #
 # 用途：一次性装好运行 flowagent 所需的全部依赖——
-#   1) Go（缺失时用系统包管理器安装）    5) 编译后端到 bin/
-#   2) Node.js（缺失时用系统包管理器安装）6) 前端 npm install
-#   3) Python（缺失时用系统包管理器安装）7) 项目级 venv + 基础库
-#   4) 生成默认配置 config/config.yaml    8) skills 运行时依赖（pdfkit-py 独立）
+#   1) Go（缺失时用系统包管理器安装）
+#   2) Node.js（缺失时用系统包管理器安装）
+#   3) Python（缺失时用系统包管理器安装）
+#   4) Git（缺失时用系统包管理器安装）
+#   5) 生成默认配置 config/config.yaml
+#   6) 编译后端到 bin/
+#   7) 前端 npm install
+#   8) 项目级 venv + 基础库
+#   9) skills 运行时依赖（pdfkit-py 独立）
 #
 # 与 Windows 版 install.bat 的区别：本脚本面向 Linux / macOS，缺失依赖时优先
 # 用系统自带包管理器安装（macOS=Homebrew，Debian/Ubuntu=apt，RHEL/CentOS=yum/dnf），
@@ -182,6 +187,34 @@ ensure_python() {
 }
 
 # ============================================================================
+#  Git
+# ============================================================================
+# 为什么需要：内置的 git MCP server（mcp-server-git）以及工作区里的版本控制
+# 能力都直接调用系统 git 命令，缺失时这些工具会全部不可用。
+#
+# 缺失时用系统包管理器安装。git 在各发行版的包名都叫 git（brew / apt / yum /
+# dnf 通用）。安装失败只告警、不设 MISSING —— git 不是编译前置依赖，
+# 核心功能（LLM + 工作区）在没有它时仍可运行。
+ensure_git() {
+  if has git; then
+    ok "Git $(git --version 2>/dev/null | awk '{print $3}')"
+    return 0
+  fi
+
+  echo "  [--] Git 未找到，用 $PKG 安装 ..."
+  if ! pkg_install "git"; then
+    warn "Git 安装失败，请手动安装后重跑（git MCP 将不可用）"
+    return 0
+  fi
+
+  if has git; then
+    ok "Git $(git --version 2>/dev/null | awk '{print $3}')"
+  else
+    warn "Git 安装后仍不可用，请检查 PATH（git MCP 将不可用）"
+  fi
+}
+
+# ============================================================================
 #  主流程
 # ============================================================================
 
@@ -205,14 +238,18 @@ ensure_node
 step "3. Python（缺失时用 $PKG 安装）"
 ensure_python
 
+# ── 4. Git ──
+step "4. Git（缺失时用 $PKG 安装）"
+ensure_git
+
 if [ "$MISSING" = 1 ]; then
   echo ""
   fail "请先解决上述缺失的运行时，再重新运行本脚本。"
   exit 1
 fi
 
-# ── 4. 生成默认配置 ──
-step "4. 生成默认配置（config/config.yaml）"
+# ── 5. 生成默认配置 ──
+step "5. 生成默认配置（config/config.yaml）"
 if [ -f config/config.yaml ]; then
   ok "config/config.yaml 已存在，跳过"
 else
@@ -220,8 +257,8 @@ else
   ok "已从 config.example.yaml 生成 config/config.yaml（默认 sqlite）"
 fi
 
-# ── 5. 编译后端 ──
-step "5. 编译后端（bin/agent-server + bin/agent-scheduler）"
+# ── 6. 编译后端 ──
+step "6. 编译后端（bin/agent-server + bin/agent-scheduler）"
 mkdir -p bin
 # 国内直连 proxy.golang.org 极慢或被墙（go: downloading 长期无进展且不报错），
 # 未显式设置 GOPROXY 时默认走 goproxy.cn 优先的代理链（海外可正常回退）。
@@ -232,12 +269,12 @@ GOTOOLCHAIN=auto go build -trimpath -o bin/agent-server ./cmd/server && ok "bin/
 GOTOOLCHAIN=auto go build -trimpath -o bin/agent-scheduler ./cmd/scheduler && ok "bin/agent-scheduler"
 GOTOOLCHAIN=auto go build -trimpath -o bin/agent-supervisor ./cmd/supervisor && ok "bin/agent-supervisor"
 
-# ── 6. 前端依赖 ──
-step "6. 安装前端依赖（frontend/node_modules）"
+# ── 7. 前端依赖 ──
+step "7. 安装前端依赖（frontend/node_modules）"
 (cd frontend && npm install --no-audit --no-fund)
 
-# ── 7. 项目级 Python 虚拟环境 ──
-step "7. 项目级 Python 虚拟环境（.venv + 基础库）"
+# ── 8. 项目级 Python 虚拟环境 ──
+step "8. 项目级 Python 虚拟环境（.venv + 基础库）"
 if has python3; then
   if [ ! -x .venv/bin/python3 ]; then
     python3 -m venv .venv && ok ".venv 已创建"
@@ -254,8 +291,8 @@ else
   warn "未找到 python3，跳过项目级 venv（pdfkit-py 仍会自装独立 Python）"
 fi
 
-# ── 8. skills 运行时依赖 ──
-step "8. 安装 skills 运行时依赖（pdfkit-py / minimax-xlsx / browser-use）"
+# ── 9. skills 运行时依赖 ──
+step "9. 安装 skills 运行时依赖（pdfkit-py / minimax-xlsx / browser-use）"
 if [ -f skills/setup.sh ]; then
   bash skills/setup.sh 2>&1 | while IFS= read -r line; do printf '    %s\n' "$line"; done
   rc=${PIPESTATUS[0]}

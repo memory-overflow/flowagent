@@ -3,13 +3,18 @@ REM ============================================================================
 REM flowagent dependency installer (Windows)
 REM
 REM Steps:
-REM   1) Go (auto install)   2) Node.js (auto install)   3) Python (auto install)
-REM   4) generate default config
-REM   5) build backend       6) frontend npm install
-REM   7) project venv        8) skills runtime deps
+REM   1) Go (auto install)
+REM   2) Node.js (auto install)
+REM   3) Python (auto install)
+REM   4) Git (auto install)
+REM   5) generate default config
+REM   6) build backend
+REM   7) frontend npm install
+REM   8) project venv
+REM   9) skills runtime deps
 REM
-REM Go / Node.js / Python are downloaded automatically when missing or when the
-REM installed version is too old. They are unpacked into ".tools\" inside this
+REM Go / Node.js / Python / Git are downloaded automatically when missing or when
+REM the installed version is too old. They are unpacked into ".tools\" inside this
 REM project (portable, no admin rights, nothing written outside the project).
 REM
 REM Usage: install.bat
@@ -77,7 +82,7 @@ call :use_local_tools
 
 REM --- 1. Go ---
 echo.
-echo [1/8] Check Go
+echo [1/9] Check Go
 call :ensure_go
 if errorlevel 1 (
     echo   [FAIL] Go is unavailable.
@@ -87,7 +92,7 @@ if errorlevel 1 (
 
 REM --- 2. Node.js ---
 echo.
-echo [2/8] Check Node.js ^(18+ required^)
+echo [2/9] Check Node.js ^(18+ required^)
 call :ensure_node
 if errorlevel 1 (
     echo   [FAIL] Node.js is unavailable.
@@ -97,16 +102,24 @@ if errorlevel 1 (
 
 REM --- 3. Python ---
 echo.
-echo [3/8] Check Python ^(3.10+ required^)
+echo [3/9] Check Python ^(3.10+ required^)
 call :ensure_python
 if errorlevel 1 (
     echo   [WARN] Python 3.10+ unavailable.
-    echo          pdfkit-py will try to download its own runtime in step 8.
+    echo          pdfkit-py will try to download its own runtime in step 9.
 )
 
-REM --- 4. Generate default config ---
+REM --- 4. Git ---
 echo.
-echo [4/8] Generate default config
+echo [4/9] Check Git
+call :ensure_git
+if errorlevel 1 (
+    echo   [WARN] Git is unavailable, the git MCP server will not work.
+)
+
+REM --- 5. Generate default config ---
+echo.
+echo [5/9] Generate default config
 if not exist config\config.yaml (
     copy /y config\config.example.yaml config\config.yaml
     echo   [OK] config\config.yaml created from example ^(default sqlite^)
@@ -114,9 +127,9 @@ if not exist config\config.yaml (
     echo   [OK] config\config.yaml already exists, skipped
 )
 
-REM --- 5. Build backend ---
+REM --- 6. Build backend ---
 echo.
-echo [5/8] Build backend
+echo [6/9] Build backend
 if not exist bin mkdir bin
 call :go_build ./cmd/server bin\agent-server.exe
 if errorlevel 1 (
@@ -135,9 +148,9 @@ if errorlevel 1 (
 )
 echo   [OK] backend built
 
-REM --- 6. Frontend deps ---
+REM --- 7. Frontend deps ---
 echo.
-echo [6/8] Install frontend dependencies
+echo [7/9] Install frontend dependencies
 cd frontend
 call npm install --no-audit --no-fund
 if !errorlevel! NEQ 0 (
@@ -149,9 +162,9 @@ if not exist frontend\node_modules (
     echo   [WARN] frontend\node_modules not found, frontend may not work.
 )
 
-REM --- 7. Project venv ---
+REM --- 8. Project venv ---
 echo.
-echo [7/8] Create project venv ^(.venv + base libs^)
+echo [8/9] Create project venv ^(.venv + base libs^)
 set "PYOK="
 REM Probe hardening: same as :ensure_python - require the version token to
 REM start with a digit so the Microsoft Store python stub ("Python was not
@@ -193,9 +206,9 @@ if defined PYOK (
     echo   [WARN] Python not found or is the Microsoft Store stub, skip project venv
 )
 
-REM --- 8. Skills runtime deps ---
+REM --- 9. Skills runtime deps ---
 echo.
-echo [8/8] Install skills runtime dependencies
+echo [9/9] Install skills runtime dependencies
 if exist skills\pdfkit-py\scripts\setup.bat (
     call skills\pdfkit-py\scripts\setup.bat --no-pause
 ) else (
@@ -229,6 +242,7 @@ REM ---------------------------------------------------------------------------
 if exist "!TOOLS_DIR!\go\bin" set "PATH=!TOOLS_DIR!\go\bin;!PATH!"
 if exist "!TOOLS_DIR!\node"   set "PATH=!TOOLS_DIR!\node;!PATH!"
 if exist "!TOOLS_DIR!\python" set "PATH=!TOOLS_DIR!\python;!TOOLS_DIR!\python\Scripts;!PATH!"
+if exist "!TOOLS_DIR!\git\cmd" set "PATH=!TOOLS_DIR!\git\cmd;!PATH!"
 exit /b 0
 
 REM ---------------------------------------------------------------------------
@@ -497,6 +511,68 @@ if not exist "!TOOLS_DIR!\python\python.exe" (
 REM python-build-standalone ships only python.exe; alias python3.exe so
 REM `python3 ...` also resolves whenever .tools\python is on PATH.
 copy /y "!TOOLS_DIR!\python\python.exe" "!TOOLS_DIR!\python\python3.exe"
+exit /b 0
+
+REM ---------------------------------------------------------------------------
+REM  Git
+REM ---------------------------------------------------------------------------
+REM Why: the built-in git MCP server (mcp-server-git) and the workspace
+REM version-control tools all shell out to a system "git" command; without it
+REM every git_* tool fails. Installed as a portable MinGit under .tools\git -
+REM the official Git for Windows distribution meant for embedding by 3rd-party
+REM apps (plain .zip, no installer, no admin rights, nothing written outside
+REM the project), so it follows the exact same pattern as Node.js above.
+:ensure_git
+if "!FORCE_TOOLS!"=="1" goto :git_install
+
+set "GITV="
+for /f "tokens=1,2,3" %%a in ('git --version 2^>^&1') do if not defined GITV if /i "%%a"=="git" if /i "%%b"=="version" set "GITV=%%c"
+if defined GITV (
+    echo   [OK] Git !GITV! found
+    exit /b 0
+)
+echo   [--] Git not found.
+
+:git_install
+echo   Installing portable Git into .tools\git ...
+call :install_git
+if errorlevel 1 exit /b 1
+set "PATH=!TOOLS_DIR!\git\cmd;!PATH!"
+set "GITV="
+for /f "tokens=1,2,3" %%a in ('git --version 2^>^&1') do if not defined GITV if /i "%%a"=="git" if /i "%%b"=="version" set "GITV=%%c"
+if defined GITV (echo   [OK] Git !GITV! ready) else (echo   [FAIL] Git installed but not runnable & exit /b 1)
+exit /b 0
+
+:install_git
+call :detect_arch
+REM MinGit, chosen over PortableGit on purpose: PortableGit ships as a
+REM self-extracting .7z.exe whose PE subsystem is GUI, so cmd does NOT wait
+REM for it - the unpack would race the version check right after. MinGit is a
+REM plain .zip that extracts with the built-in bsdtar, exactly like Node.js.
+set "GITVER=2.56.0.windows.2"
+set "GITNUM=2.56.0.2"
+if /i "!ARCH!"=="arm64" (set "GITPKG=MinGit-!GITNUM!-arm64.zip") else (set "GITPKG=MinGit-!GITNUM!-64-bit.zip")
+REM npmmirror mirrors git-for-windows in full and is fast in mainland China;
+REM fall back to the GitHub release through the accelerator chain.
+call :download "https://registry.npmmirror.com/-/binary/git-for-windows/v!GITVER!/!GITPKG!" "!TOOLS_DIR!\git.zip"
+if errorlevel 1 (
+    echo   [--] mirror failed, falling back to GitHub
+    call :download_gh "https://github.com/git-for-windows/git/releases/download/v!GITVER!/!GITPKG!" "!TOOLS_DIR!\git.zip"
+)
+if errorlevel 1 exit /b 1
+if exist "!TOOLS_DIR!\git" rmdir /s /q "!TOOLS_DIR!\git"
+mkdir "!TOOLS_DIR!\git"
+echo   Extracting ...
+if defined BSDTAR "!BSDTAR!" -xf "!TOOLS_DIR!\git.zip" -C "!TOOLS_DIR!\git"
+if not exist "!TOOLS_DIR!\git\cmd\git.exe" (
+    echo   [--] tar failed, retrying with PowerShell ...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '!TOOLS_DIR!\git.zip' -DestinationPath '!TOOLS_DIR!\git' -Force"
+)
+if exist "!TOOLS_DIR!\git.zip" del "!TOOLS_DIR!\git.zip"
+if not exist "!TOOLS_DIR!\git\cmd\git.exe" (
+    echo   [FAIL] extracting Git failed.
+    exit /b 1
+)
 exit /b 0
 
 REM ---------------------------------------------------------------------------

@@ -19,6 +19,9 @@ REM Use project-local portable runtimes installed by install.bat (if any).
 if exist "%~dp0.tools\go\bin" set "PATH=%~dp0.tools\go\bin;%PATH%"
 if exist "%~dp0.tools\node" set "PATH=%~dp0.tools\node;%PATH%"
 if exist "%~dp0.tools\python" set "PATH=%~dp0.tools\python;%~dp0.tools\python\Scripts;%PATH%"
+REM .tools\git\cmd must be on PATH for the built-in git MCP server (it shells
+REM out to a plain "git" command). Harmless when a system Git is already present.
+if exist "%~dp0.tools\git\cmd" set "PATH=%~dp0.tools\git\cmd;%PATH%"
 
 call :main %*
 set "RC=%errorlevel%"
@@ -56,7 +59,14 @@ if not defined NODEVER (
     echo [FAIL] Node.js not found or not runnable. Run install.bat first.
     exit /b 1
 )
-echo [OK] Go %GOVER% / Node %NODEVER%
+set "GITVER="
+for /f "tokens=1,2,3" %%a in ('git --version 2^>^&1') do if not defined GITVER if /i "%%a"=="git" if /i "%%b"=="version" set "GITVER=%%c"
+if defined GITVER (
+    echo [OK] Go %GOVER% / Node %NODEVER% / Git %GITVER%
+) else (
+    echo [OK] Go %GOVER% / Node %NODEVER%
+    echo [--] Git not found - the git MCP server will be unavailable ^(re-run install.bat to auto-install^)
+)
 
 REM --- 2. Config check ---
 if not exist config\config.yaml (

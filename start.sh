@@ -28,6 +28,8 @@ echo "=== flowagent 一键启动 ==="
 # ── 1. 运行时检查 ──
 if ! has go; then fail "未找到 Go，请先运行 bash install.sh"; exit 1; fi
 if ! has node; then fail "未找到 Node.js，请先运行 bash install.sh"; exit 1; fi
+# git 不是启动的硬性前置（核心功能不依赖它），缺失只提示、不阻断。
+has git || warn "未找到 Git —— git MCP 与工作区版本控制工具将不可用（重跑 install.sh 可自动安装）"
 
 # ── 2. 配置检查 ──
 if [ ! -f config/config.yaml ]; then
