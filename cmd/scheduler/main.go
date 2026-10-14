@@ -141,6 +141,11 @@ func main() {
 	log.Printf("Received signal %s, shutting down...", sig)
 
 	stageScheduler.Close()
+
+	// 关闭 MCP 连接池：池内连接持有 npx / python 子进程（以及 playwright 拉起的
+	// 浏览器）。Windows 上父进程退出不会自动带走子进程，不显式关会留下孤儿进程。
+	mcppkg.CloseAll()
+
 	log.Println("Scheduler shut down gracefully")
 }
 
