@@ -66,7 +66,7 @@ bash start.sh
 start.bat
 ```
 
-This launches the backend (supervisor → server + scheduler) and the frontend, then automatically opens the web UI at **http://localhost:3000** in your browser. If it doesn't open, visit that URL manually.
+This launches the backend (supervisor → server + scheduler) and the frontend, then automatically opens the web UI at [http://localhost:3000](http://localhost:3000) in your browser. If it doesn't open, visit that URL manually.
 
 ### 3. Stop
 
