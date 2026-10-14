@@ -162,7 +162,6 @@ See [`api/v1/workflow_agent.proto`](api/v1/workflow_agent.proto) for the full da
 | Engine | Requires key | Notes |
 |---|---|---|
 | **baidu** (default) | No | Zero-key, works out of the box; good Chinese coverage, but weaker on English/international content and may hit anti-bot checks under heavy use |
-| **ddg** (DuckDuckGo) | No | Zero-key, but unreachable from mainland China (the server probes it before switching) |
 | **serper** / **bocha** / **tavily** | Yes | Commercial search APIs with more stable, structured results and better English coverage; each needs its own key |
 
 **Baidu vs other engines**: Baidu is the free, zero-key default — ideal for out-of-the-box use and Chinese-language queries. The commercial APIs (Serper / Bocha / Tavily) return higher-quality, structured results with better English and international coverage, suited for production and high-quality retrieval, but require a paid key. When no key is configured, flowagent falls back to Baidu automatically.
