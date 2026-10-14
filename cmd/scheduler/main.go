@@ -28,6 +28,7 @@ import (
 	"github.com/memory-overflow/flowagent/config"
 	"github.com/memory-overflow/flowagent/dao"
 	"github.com/memory-overflow/flowagent/model"
+	"github.com/memory-overflow/flowagent/pkg/contextmgr"
 	mcppkg "github.com/memory-overflow/flowagent/pkg/mcp"
 	"github.com/memory-overflow/flowagent/pkg/stream"
 	"github.com/memory-overflow/flowagent/schedule"
@@ -124,6 +125,12 @@ func main() {
 	// 预热内置 MCP：后台把 npx 包下载 / Node 冷启动 / Playwright 内核加载等
 	// 昂贵开销摊到启动期，避免用户首个请求吃到几十秒冷启动。失败只记日志。
 	go mcppkg.PrewarmBuiltins(mcpBuiltinsDir())
+
+	// 预热 token 计数器：首次要下载 o200k_base BPE 词典（约 3.4MB）并解析
+	// 几十万条规则，慢网下实测下载可占近一分钟。与上面一样摊到启动期后台执行，
+	// 否则这段时间会落在用户首个任务的上下文组装上（表现为首轮几十秒无响应）。
+	// 预热未完成时计数自动走启发式估算，不阻塞、不影响链路。
+	go contextmgr.WarmCounter()
 
 	log.Println("Stage scheduler running. Press Ctrl+C to stop.")
 
