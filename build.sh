@@ -44,15 +44,24 @@ cd "${ROOT_DIR}"
 echo "==> 编译后端二进制 ..."
 # 国内直连 proxy.golang.org 极慢或被墙，未显式设置 GOPROXY 时默认 goproxy.cn 优先。
 export GOPROXY="${GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}"
-echo "  -> bin/agent-server"
+
+# Windows（Git Bash / MSYS / Cygwin）下产物必须带 .exe 后缀：
+# supervisor 的 binPath、start.bat、install.bat 都按 agent-server.exe 查找，
+# 无后缀会导致 spawn 失败 —— 症状是「编译明明成功，重启后却还在跑旧代码」。
+EXE=""
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) EXE=".exe" ;;
+esac
+
+echo "  -> bin/agent-server${EXE}"
 # GOTOOLCHAIN=auto：本机 Go 低于 go.mod 要求（1.25.5）时自动下载对应工具链。
-GOTOOLCHAIN=auto go build -trimpath -o "${BIN_DIR}/agent-server" ./cmd/server
+GOTOOLCHAIN=auto go build -trimpath -o "${BIN_DIR}/agent-server${EXE}" ./cmd/server
 
-echo "  -> bin/agent-scheduler"
-GOTOOLCHAIN=auto go build -trimpath -o "${BIN_DIR}/agent-scheduler" ./cmd/scheduler
+echo "  -> bin/agent-scheduler${EXE}"
+GOTOOLCHAIN=auto go build -trimpath -o "${BIN_DIR}/agent-scheduler${EXE}" ./cmd/scheduler
 
-echo "  -> bin/agent-supervisor"
-GOTOOLCHAIN=auto go build -trimpath -o "${BIN_DIR}/agent-supervisor" ./cmd/supervisor
+echo "  -> bin/agent-supervisor${EXE}"
+GOTOOLCHAIN=auto go build -trimpath -o "${BIN_DIR}/agent-supervisor${EXE}" ./cmd/supervisor
 
 if ${BUILD_FRONTEND}; then
   echo "==> 编译前端 ..."
