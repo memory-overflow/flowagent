@@ -12,6 +12,7 @@ A conversation-driven workflow orchestration framework — turn natural-language
 - [Features](#features)
 - [Two ways to use](#two-ways-to-use)
 - [API Overview](#api-overview)
+- [Search Engine](#search-engine)
 - [Documentation](#documentation)
 - [Contributing](#contributing)
 - [Star History](#star-history)
@@ -154,6 +155,18 @@ All endpoints live under `/api/v1`, wrapped in a unified JSON envelope `{"code":
 
 See [`api/v1/workflow_agent.proto`](api/v1/workflow_agent.proto) for the full data structures.
 
+## Search Engine
+
+`web_search` / `deep_search` use pluggable search engines (configured via the global `search_config`, the frontend search page, or `POST /search-config/*`):
+
+| Engine | Requires key | Notes |
+|---|---|---|
+| **baidu** (default) | No | Zero-key, works out of the box; good Chinese coverage, but weaker on English/international content and may hit anti-bot checks under heavy use |
+| **ddg** (DuckDuckGo) | No | Zero-key, but unreachable from mainland China (the server probes it before switching) |
+| **serper** / **bocha** / **tavily** | Yes | Commercial search APIs with more stable, structured results and better English coverage; each needs its own key |
+
+**Baidu vs other engines**: Baidu is the free, zero-key default — ideal for out-of-the-box use and Chinese-language queries. The commercial APIs (Serper / Bocha / Tavily) return higher-quality, structured results with better English and international coverage, suited for production and high-quality retrieval, but require a paid key. When no key is configured, flowagent falls back to Baidu automatically.
+
 ## Documentation
 
 - [Architecture & implementation](docs/architecture.md) — the overall technical architecture and implementation philosophy, explained module by module (the directory structure lives there).
@@ -167,12 +180,21 @@ flowagent is open source and welcomes contributions. We're actively looking for 
 - Fork the repo and open a pull request.
 - Questions, ideas, or want to become a maintainer? Reach out at **zhengaohong@gmail.com**.
 
+### Roadmap
+
+The framework is still evolving. The following areas are not yet ready and welcome community contributions:
+
+- **Global memory** — cross-conversation long-term memory (user preferences, past decisions) is not built yet; this is a high-priority direction.
+- **Built-in knowledge base** — there is no built-in vector knowledge base yet; you need to plug in an external knowledge-base / RAG skill for retrieval augmentation.
+
+If either direction interests you, feel free to pick up an issue or open a PR — let's build flowagent together.
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=memory-overflow/flowagent&type=Date)](https://star-history.com/#memory-overflow/flowagent&Date)
 
 ## License
 
-[Apache License 2.0](LICENSE).
+[MIT License](LICENSE).
 
-Third-party component notices are in [NOTICE](NOTICE). In particular, `skills/pdfkit-py` depends on PyMuPDF (AGPL-3.0); that directory is not covered by this repo's Apache-2.0 license, and enabling it requires you to comply with the AGPL terms.
+Third-party component notices are in [NOTICE](NOTICE). In particular, `skills/pdfkit-py` depends on PyMuPDF (AGPL-3.0); that directory is not covered by this repo's MIT license, and enabling it requires you to comply with the AGPL terms.
