@@ -26,8 +26,19 @@ import (
 	"github.com/memory-overflow/flowagent/model"
 )
 
-// DefaultTimeout 单次 MCP 操作的默认超时
-const DefaultTimeout = 30 * time.Second
+// DefaultTimeout 单次 MCP 操作的默认超时（用户请求路径：拉取工具列表、调用工具）。
+//
+// 30s 对已预热的 server 足够；但若用户请求恰好赶上某个 server 尚未预热完
+// （首次下载包仍在进行），过短的预算会让这次请求直接失败。放宽到 60s，
+// 既给冷启动留出余量，又不至于让交互停滞太久。
+const DefaultTimeout = 60 * time.Second
+
+// PrewarmTimeout 启动期预热的单 server 超时。
+//
+// 明显宽于 DefaultTimeout：预热跑在后台 goroutine、用户并不等待，而
+// 首次下载（npx 拉包、Playwright 下内核等）在网络不佳时动辄超过一分钟。
+// 给足预算，让这类一次性开销在启动期付清，用户首个请求才不会撞上下载。
+const PrewarmTimeout = 180 * time.Second
 
 // clientName / clientVersion MCP 握手时上报的客户端标识
 const (
@@ -58,6 +69,10 @@ type ServerConfig struct {
 
 // ConfigFromModel 把 DB 里的 model.MCPServer 解析成连接配置。
 // Args / Env / Headers 在 DB 里是 JSON 字符串，这里统一解析。
+//
+// Command 过一遍 NormalizeCommand：内置 MCP（fetch / git）的清单里存的是
+// Unix 相对路径 .venv/bin/python，落库后原样保留，到 Windows 上必须在
+// 这里补上 .venv/bin → .venv\Scripts 的换算，否则调度器起子进程会失败。
 func ConfigFromModel(s *model.MCPServer) (*ServerConfig, error) {
 	if s == nil {
 		return nil, fmt.Errorf("mcp: nil server model")
@@ -69,7 +84,7 @@ func ConfigFromModel(s *model.MCPServer) (*ServerConfig, error) {
 		ServerID:   s.ID,
 		ServerName: s.Name,
 		Transport:  s.Transport,
-		Command:    s.Command,
+		Command:    NormalizeCommand(s.Command),
 		Args:       parseStringSlice(s.Args),
 		Env:        envMapToSlice(parseStringMap(s.Env)),
 		URL:        s.URL,

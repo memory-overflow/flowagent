@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 )
 
 // BuiltinManifest 一个内置 MCP 的清单
@@ -85,7 +87,7 @@ func (m *BuiltinManifest) ServerConfig() *ServerConfig {
 	return &ServerConfig{
 		ServerName: m.Name,
 		Transport:  e.Transport,
-		Command:    normalizeCommand(e.Command),
+		Command:    NormalizeCommand(e.Command),
 		Args:       e.Args,
 		Env:        envMapToSlice(e.Env),
 		URL:        e.URL,
@@ -93,15 +95,20 @@ func (m *BuiltinManifest) ServerConfig() *ServerConfig {
 	}
 }
 
-// normalizeCommand 对内置清单的 command 做跨平台适配。
+// NormalizeCommand 对 MCP 的 command 做跨平台适配。
 //
-// 内置清单（如 fetch）的 command 写的是 Unix 相对路径 .venv/bin/python，
+// 内置清单（如 fetch / git）的 command 写的是 Unix 相对路径 .venv/bin/python，
 // 而 Windows 上 venv 的可执行文件在 .venv\Scripts\python.exe。若不替换，
 // Windows 上启动 stdio 子进程会报「executable file not found」导致该 MCP 直接不可用。
 //
-// 仅作用于内置清单（BuiltinManifest.ServerConfig），用户自定义导入的 MCP
-// 配置不经过这里，不受影响。
-func normalizeCommand(cmd string) string {
+// 必须在「DB/清单配置 → 运行时配置」的每个转换点调用：清单侧是 ServerConfig，
+// DB 侧是 ConfigFromModel（调度器）与 handler 的测试接口。内置 MCP 一旦被
+// 「一键导入」，配置就落库成原始形式，此后所有连接都读 DB —— 只在 ServerConfig
+// 里改写会导致「预热成功、但界面上的测试按钮失败」这种不一致。
+//
+// 匹配的是三个精确的项目内相对路径（Clean 后），对用户自定义 MCP 无副作用：
+// 真用了这几个路径，其语义也正是「项目自带的 venv」，同样需要按平台解析。
+func NormalizeCommand(cmd string) string {
 	if runtime.GOOS != "windows" {
 		return cmd
 	}
@@ -135,7 +142,11 @@ func LoadBuiltinServer(dir, key string) *ServerConfig {
 // 把 npx 首次下载包 / Node 冷启动 / Playwright 加载内核等昂贵开销
 // 摊到进程启动期，避免用户首个请求吃到几十秒的冷启动。
 //
-// 单个清单失败只记日志不中断，也不影响后续清单。应由调用方放进 goroutine。
+// 各清单并发预热：这些开销几乎全是网络等待，串行会把总时长变成各 server
+// 之和（配合 PrewarmTimeout 放宽后，最坏可达十几分钟）。并发后总耗时约
+// 等于最慢的那一个。
+//
+// 单个清单失败只记日志不中断，也不影响其它清单。应由调用方放进 goroutine。
 func PrewarmBuiltins(dir string) {
 	manifests, err := LoadBuiltins(dir)
 	if err != nil {
@@ -146,6 +157,10 @@ func PrewarmBuiltins(dir string) {
 		return
 	}
 
+	start := time.Now()
+	var wg sync.WaitGroup
+	var pending int
+
 	for _, m := range manifests {
 		if m.Hidden {
 			continue // 隐藏清单（能力已内置）不预热
@@ -154,14 +169,23 @@ func PrewarmBuiltins(dir string) {
 		if cfg == nil || cfg.Transport == "" || cfg.Command == "" {
 			continue // 非 stdio 或缺失命令的清单跳过
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
-		_, lerr := ListTools(ctx, cfg)
-		cancel()
-		if lerr != nil {
-			log.Printf("[mcp-prewarm] %s failed: %v", m.Name, lerr)
-			continue
-		}
-		log.Printf("[mcp-prewarm] %s ready", m.Name)
+		pending++
+		wg.Add(1)
+		go func(name string, cfg *ServerConfig) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), PrewarmTimeout)
+			defer cancel()
+			if _, lerr := ListTools(ctx, cfg); lerr != nil {
+				log.Printf("[mcp-prewarm] %s failed: %v", name, lerr)
+				return
+			}
+			log.Printf("[mcp-prewarm] %s ready", name)
+		}(m.Name, cfg)
+	}
+
+	wg.Wait()
+	if pending > 0 {
+		log.Printf("[mcp-prewarm] done: %d server(s) in %.1fs", pending, time.Since(start).Seconds())
 	}
 }
 
