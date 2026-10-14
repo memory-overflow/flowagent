@@ -88,5 +88,9 @@ echo Launching supervisor (server + scheduler) and frontend...
 start "flowagent-supervisor" cmd /k "bin\agent-supervisor.exe -config config\config.yaml"
 start "flowagent-frontend" cmd /k "cd frontend && npm run dev"
 
-echo Done. Close each window to stop the corresponding process.
+REM 前端起来后自动打开浏览器（vite 冷启动需数秒，后台延迟打开，失败不阻断）
+start "" cmd /c "timeout /t 6 /nobreak >nul & start http://localhost:3000"
+
+echo Done. The web UI will open at http://localhost:3000 automatically.
+echo Close each window to stop the corresponding process.
 exit /b 0

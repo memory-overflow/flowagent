@@ -66,7 +66,7 @@ bash start.sh
 start.bat
 ```
 
-This launches agent-server + agent-scheduler + the frontend. Open the frontend URL to chat and inspect DAG workflows.
+This launches the backend (supervisor → server + scheduler) and the frontend, then automatically opens the web UI at **http://localhost:3000** in your browser. If it doesn't open, visit that URL manually.
 
 ### 3. Stop
 

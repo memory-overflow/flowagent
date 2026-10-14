@@ -73,6 +73,20 @@ ok "agent-supervisor 启动 (pid $!) —— 托管 server/scheduler，逃生端�
 PIDS="$PIDS $!"
 ok "前端启动 (pid $!) —— 地址见上方 vite 输出"
 
+# 前端起来后自动在浏览器打开 http://localhost:3000（vite 冷启动需数秒，
+# 后台轮询端口就绪再打开；打开失败不阻断启动，也不纳入 PIDS 由 Ctrl+C 管理）。
+(
+  for _ in $(seq 1 30); do
+    if curl -s -o /dev/null --max-time 1 http://127.0.0.1:3000 2>/dev/null; then
+      if has open; then open http://localhost:3000
+      elif has xdg-open; then xdg-open http://localhost:3000
+      fi
+      break
+    fi
+    sleep 1
+  done
+) &
+
 echo ""
-echo "两个进程已启动，按 Ctrl+C 停止全部。"
+echo "两个进程已启动（前端就绪后会自动打开浏览器 http://localhost:3000），按 Ctrl+C 停止全部。"
 wait

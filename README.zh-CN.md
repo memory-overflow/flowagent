@@ -66,7 +66,7 @@ bash start.sh
 start.bat
 ```
 
-会拉起 agent-server + agent-scheduler + 前端。打开前端地址即可对话、查看 DAG 工作流。
+会拉起后端（supervisor → server + scheduler）与前端，并自动在浏览器打开 **http://localhost:3000**。若未自动打开，可手动访问该地址。
 
 ### 3. 停止
 
