@@ -464,7 +464,7 @@ func shellCommand() (name, flag string) {
 func ShellHint() string {
 	switch runtime.GOOS {
 	case "windows":
-		return "当前运行环境是 Windows，请在 run_command / shell 等工具里使用 Windows cmd 兼容的命令（例如 dir、type、copy、del、mkdir，而不是 ls、cat、cp、rm、chmod），路径用反斜杠 \\。"
+		return "当前运行环境是 Windows，请在 run_command / shell 等工具里使用 Windows cmd 兼容的命令（例如 dir、type、copy、del、mkdir，而不是 ls、cat、cp、rm、chmod），路径用反斜杠 \\。Python 命令请用 python（不要用 python3，Windows 上这个名字不可靠）；带空格的路径参数用双引号包裹。"
 	case "darwin":
 		return "当前运行环境是 macOS，请使用 Unix shell 兼容的命令（bash/zsh，例如 ls、cat、cp、rm）。"
 	default:
@@ -550,8 +550,11 @@ func runCommandTool() *ToolDef {
 			// pipe 写端，导致下面的 Wait 一直等不到 EOF、超时形同虚设
 			// （实测 ctx=2s 的 `sh -c "sleep 15 & wait"` 要 15s 才返回）。
 			// 改为自己起进程组 + select 等超时 + kill 整组。
-			shellName, shellFlag := shellCommand()
-			ec := exec.Command(shellName, shellFlag, cmd)
+			//
+			// 构造走 buildShellCmd：Windows 上必须用 SysProcAttr.CmdLine 直传
+			// 原始命令行（cmd.exe 不按 CRT argv 规则解析，EscapeArg 的 \"
+			// 转义会破坏命令内引号配对，详见 process_windows.go）。
+			ec := buildShellCmd(cmd)
 			ec.Dir = wc.WorkspaceDir
 			// 项目 venv 注入：把 .venv 的可执行目录提到子进程 PATH 最前（并设
 			// VIRTUAL_ENV），python / pip 即指向项目 venv。不在命令前拼接激活
