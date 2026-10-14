@@ -105,10 +105,12 @@ ensure_go() {
 
   local gv="$(go version | awk '{print $3}' | sed 's/^go//')"
   if ver_ge "$gv" "$req"; then
-    ok "Go $gv（满足 $req）"
+    # ${gv} 必须用花括号：bash 3.2 下 $gv 后紧跟全角括号会被误解析成变量名
+    # （报 gv0: unbound variable），与 stop.sh 之前踩过的坑相同。
+    ok "Go ${gv}（满足 ${req}）"
   else
-    warn "Go $gv 低于 go.mod 要求的 $req"
-    echo "  编译时已启用 GOTOOLCHAIN=auto，会自动下载 go$req 工具链（走 GOPROXY，仅需一次）"
+    warn "Go ${gv} 低于 go.mod 要求的 ${req}"
+    echo "  编译时已启用 GOTOOLCHAIN=auto，会自动下载 go${req} 工具链（走 GOPROXY，仅需一次）"
   fi
 }
 
@@ -125,7 +127,7 @@ install_node_via_nodesource() {
     *) return 1 ;;
   esac
   has curl || { warn "未找到 curl，无法自动配 NodeSource"; return 1; }
-  echo "  配置 NodeSource 22.x 源（需 sudo，脚本来自 $url）..."
+  echo "  配置 NodeSource 22.x 源（需 sudo，脚本来自 ${url}）..."
   curl -fsSL "$url" | sudo -E bash - && pkg_install "nodejs"
 }
 
@@ -134,7 +136,7 @@ ensure_node() {
   if has node; then
     local nv="$(node -v | sed 's/^v//')"
     if ver_ge "$nv" "18.0.0"; then
-      ok "Node.js v$nv（满足 18+）"
+      ok "Node.js v${nv}（满足 18+）"
       return 0
     fi
     echo "  [--] Node.js v$nv 低于 18。"
@@ -157,7 +159,7 @@ ensure_node() {
   # 最终校验版本
   local nv="$(node -v | sed 's/^v//')"
   if ver_ge "$nv" "18.0.0"; then
-    ok "Node.js v$nv（满足 18+）"
+    ok "Node.js v${nv}（满足 18+）"
   else
     fail "Node.js v$nv 仍低于 18"
     echo "  macOS: brew upgrade node"
@@ -180,7 +182,7 @@ ensure_python() {
   local pv="$(python3 -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])' 2>/dev/null)"
   [ -n "$pv" ] || pv="$(python3 --version 2>&1 | awk '{print $2}')"
   if ver_ge "$pv" "3.10.0"; then
-    ok "Python $pv（满足 3.10+）"
+    ok "Python ${pv}（满足 3.10+）"
   else
     warn "Python $pv 低于 3.10，部分 skill 可能不可用"
   fi
@@ -297,7 +299,7 @@ if [ -f skills/setup.sh ]; then
   bash skills/setup.sh 2>&1 | while IFS= read -r line; do printf '    %s\n' "$line"; done
   rc=${PIPESTATUS[0]}
   if [ "$rc" -ne 0 ]; then
-    warn "skills 依赖安装失败（退出码 $rc，详见上方输出）"
+    warn "skills 依赖安装失败（退出码 ${rc}，详见上方输出）"
   fi
 else
   warn "缺少 skills/setup.sh，跳过（skills 依赖未安装）"
