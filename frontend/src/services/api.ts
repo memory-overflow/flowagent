@@ -98,6 +98,17 @@ export function openLocalFile(url: string) {
   return http.get<CommonResponse<null>>(openPath);
 }
 
+/** 在文件管理器中定位文件（打开所在目录并选中）。 */
+export function revealFile(url: string) {
+  const revealPath = url.replace('/api/v1/files/download', '/files/reveal');
+  return http.get<CommonResponse<null>>(revealPath);
+}
+
+/** 打开当前对话的工作空间目录。 */
+export function openWorkspace(chatId: string) {
+  return http.get<CommonResponse<null>>(`/files/open-workspace?chat_id=${encodeURIComponent(chatId)}`);
+}
+
 /** 发送消息。inputFiles 为 uploadFile 返回的 FileInfo 列表（已落盘工作区） */
 /**
  * 发送一条消息，创建对话任务。

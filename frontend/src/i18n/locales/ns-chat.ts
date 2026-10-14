@@ -67,6 +67,9 @@ export const chatNS = {
     expandResult: '◀ 📦 结果',
     viewWorkflowTitle: '查看当前工作流 DAG',
     workflow: '🕸️ 工作流',
+    openWorkspaceTitle: '在文件管理器中打开当前对话的工作空间目录',
+    openWorkspace: '📂 工作空间',
+    openWorkspaceFailed: '打开工作空间失败: {msg}',
 
     // ---- 模型选择器 ----
     modelSelectorTitle: '选择本对话使用的模型',
@@ -194,6 +197,9 @@ export const chatNS = {
     expandResult: '◀ 📦 Results',
     viewWorkflowTitle: 'View the DAG of the current workflow',
     workflow: '🕸️ Workflow',
+    openWorkspaceTitle: 'Open the workspace folder of this conversation in the file manager',
+    openWorkspace: '📂 Workspace',
+    openWorkspaceFailed: 'Failed to open workspace: {msg}',
 
     // ---- 模型选择器 ----
     modelSelectorTitle: 'Choose the model for this conversation',

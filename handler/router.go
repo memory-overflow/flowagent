@@ -126,6 +126,10 @@ func RegisterRoutes(router *gin.RouterGroup) {
 		files.GET("/download", DownloadFile)
 		// 本地打开：用系统默认应用打开工作区文件（替换浏览器「下载」）
 		files.GET("/open", OpenFile)
+		// 定位文件：在文件管理器中打开所在目录并选中该文件
+		files.GET("/reveal", RevealFile)
+		// 打开当前对话的工作空间目录
+		files.GET("/open-workspace", OpenWorkspace)
 	}
 
 	// ========== 内部接口（scheduler → server 回调，不对外） ==========
