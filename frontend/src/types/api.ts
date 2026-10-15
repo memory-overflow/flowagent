@@ -389,21 +389,15 @@ export interface MCPServerConfig {
 // Skill 相关
 // ============================================================
 
-export enum SkillType {
-  PROMPT = 1,   // 指令型：注入 system prompt
-  COMMAND = 2,  // 可执行型：暴露为工具
-}
-
+/**
+ * Skill = 一段注入 system prompt 的指令 + 可选随包脚本（对齐行业 Agent Skills 模式），
+ * 不区分类型；脚本由模型通过内置 run_command 执行。
+ */
 export interface SkillConfig {
   id?: string;
   name: string;
   description: string;
-  type: SkillType;
   content?: string;
-  command?: string;
-  // 后端列表返回 JSON 字符串，创建/更新时传数组/对象，这里用联合类型兼容
-  args?: string[] | string;
-  env?: Record<string, string> | string;
   create_ts?: number;
   update_ts?: number;
   /** 按界面语言折算的展示值（en 有翻译用翻译，否则回落中文）；列表渲染用这个，编辑回填用 name/description */

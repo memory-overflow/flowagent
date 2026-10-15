@@ -178,7 +178,7 @@ export const zh = {
     skillsTitle: 'Skill 技能',
     skillsHintTitle: 'Skill 管理',
     skillsHintDesc:
-      '在右侧面板创建、编辑、导入 Skill。指令型注入 system prompt，可执行型作为工具被模型调用；每个对话可单独启用。',
+      '在右侧面板创建、编辑、导入 Skill。Skill 的指令注入 system prompt，随包脚本由模型通过 run_command 执行；每个对话可单独启用。',
     modelsTitle: '模型配置',
     modelsHintTitle: '全局模型配置',
     modelsHintDesc:

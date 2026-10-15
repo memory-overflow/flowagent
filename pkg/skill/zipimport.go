@@ -3,7 +3,8 @@
 // 支持三种 zip 布局：
 //
 //  1. 本项目 skill.json 单包（根直放或唯一顶层目录）：
-//     skill.json（key/name/description/type/content/command/args/env）+ scripts/...
+//     skill.json（key/name/description/content）+ scripts/...
+//     （旧包里的 type/command/args/env 字段已废弃，解码时直接忽略）
 //  2. 社区 SKILL.md 单包：
 //     SKILL.md（YAML frontmatter: name/description）+ scripts/...
 //  3. 社区 SKILL.md 集合包：
@@ -24,8 +25,6 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-
-	"github.com/memory-overflow/flowagent/model"
 )
 
 // zip 导入的安全上限
@@ -56,11 +55,7 @@ type ImportItem struct {
 	Key         string
 	Name        string
 	Description string
-	Type        model.SkillType
 	Content     string
-	Command     string
-	Args        []string
-	Env         map[string]string
 	// Files 待落地文件（相对该 skill 的 scripts 根目录）
 	Files []zipEntry
 }
@@ -206,9 +201,6 @@ func jsonPackToItem(entries []zipEntry) (*ImportItem, error) {
 	if strings.TrimSpace(mf.Name) == "" {
 		return nil, fmt.Errorf("skill: skill.json 缺少 name 字段")
 	}
-	if mf.Type == 0 {
-		mf.Type = model.SkillTypePrompt
-	}
 	if mf.Key == "" {
 		mf.Key = sanitizeSkillKey(mf.Name)
 	}
@@ -216,11 +208,7 @@ func jsonPackToItem(entries []zipEntry) (*ImportItem, error) {
 		Key:         mf.Key,
 		Name:        mf.Name,
 		Description: mf.Description,
-		Type:        mf.Type,
 		Content:     mf.Content,
-		Command:     mf.Command,
-		Args:        mf.Args,
-		Env:         mf.Env,
 		Files:       files,
 	}, nil
 }
@@ -251,7 +239,6 @@ func skillmdPackToItems(entries []zipEntry, topName string) ([]*ImportItem, erro
 		Key:         u.Key,
 		Name:        u.Name,
 		Description: u.Description,
-		Type:        model.SkillTypePrompt,
 		Content:     u.Content,
 		Files:       u.Files,
 	}}, nil

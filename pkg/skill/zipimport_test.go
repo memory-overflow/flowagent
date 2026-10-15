@@ -50,7 +50,7 @@ func TestAnalyzeJsonPack(t *testing.T) {
 		t.Fatalf("item 数 = %d, want 1", len(items))
 	}
 	it := items[0]
-	if it.Name != "演示技能" || it.Key != "demo-skill" || it.Type != 1 {
+	if it.Name != "演示技能" || it.Key != "demo-skill" {
 		t.Fatalf("item 解析错误: %+v", it)
 	}
 	if len(it.Files) != 1 || it.Files[0].name != "scripts/run.py" {

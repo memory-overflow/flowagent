@@ -168,7 +168,7 @@ export const en = {
     skillsTitle: 'Skills',
     skillsHintTitle: 'Skill management',
     skillsHintDesc:
-      'Create, edit and import skills in the panel on the right. Instruction skills are injected into the system prompt, executable ones are exposed to the model as tools; both can be enabled per conversation.',
+      'Create, edit and import skills in the panel on the right. Skill instructions are injected into the system prompt and bundled scripts are run by the model via run_command; skills can be enabled per conversation.',
     modelsTitle: 'Models',
     modelsHintTitle: 'Global model configuration',
     modelsHintDesc:

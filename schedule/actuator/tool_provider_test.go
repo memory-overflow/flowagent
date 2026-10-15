@@ -4,10 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/memory-overflow/flowagent/model"
 	"github.com/memory-overflow/flowagent/pkg/llm"
 	mcppkg "github.com/memory-overflow/flowagent/pkg/mcp"
-	skillpkg "github.com/memory-overflow/flowagent/pkg/skill"
 )
 
 // newTestToolSet 构造测试用工具集（MCP 工具）
@@ -51,39 +49,6 @@ func TestToolSetLookup(t *testing.T) {
 
 	if _, ok := ts.Lookup("nonexistent"); ok {
 		t.Error("expected lookup miss for unknown tool")
-	}
-}
-
-// TestToolSetSkillEntry 验证 command 型 skill 作为工具暴露时，
-// 名字走 skill__<name> 命名空间，Lookup 返回 Kind=toolKindSkill。
-func TestToolSetSkillEntry(t *testing.T) {
-	cfg := &skillpkg.Config{
-		Name:        "text_stats",
-		Description: "统计文本的字符/词/行数",
-		Type:        model.SkillTypeCommand,
-		Command:     "python3",
-	}
-
-	ts := newToolSet([]ToolEntry{{
-		ExposedName: cfg.ToolName(),
-		Description: cfg.Description,
-		InputSchema: cfg.ToolSchema(),
-		Kind:        toolKindSkill,
-		Skill:       cfg,
-	}})
-
-	if got, want := cfg.ToolName(), "skill__text_stats"; got != want {
-		t.Errorf("tool name = %q, want %q", got, want)
-	}
-	entry, ok := ts.Lookup(cfg.ToolName())
-	if !ok {
-		t.Fatalf("expected to find %q", cfg.ToolName())
-	}
-	if entry.Kind != toolKindSkill {
-		t.Errorf("kind = %v, want skill", entry.Kind)
-	}
-	if entry.Skill == nil || entry.Skill.Command != "python3" {
-		t.Errorf("skill entry not preserved: %+v", entry.Skill)
 	}
 }
 

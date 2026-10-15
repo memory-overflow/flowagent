@@ -682,11 +682,7 @@ export interface BuiltinSkillItem {
   /** 按界面语言折算的展示值（en 有翻译用翻译，否则回落中文）；列表渲染用这个 */
   name_display?: string;
   description_display?: string;
-  type: number;
   content?: string;
-  command?: string;
-  args?: string[];
-  env?: Record<string, string>;
   already_imported: boolean;
 }
 

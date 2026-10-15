@@ -6,12 +6,9 @@ export const skillsNS = {
     importSkill: '+ 导入技能',
     emptyTitle: '暂无 Skill',
     emptyDesc:
-      'Skill 是可复用的能力包：指令型注入 system prompt，可执行型作为工具被模型调用。点击上方按钮创建或导入。',
+      'Skill 是可复用的能力包：一段注入 system prompt 的指令，可附带随包脚本（由模型通过 run_command 执行）。点击上方按钮创建或导入。',
 
     updatedAt: '更新时间',
-
-    typeInstruction: '指令型',
-    typeExecutable: '可执行型',
 
     deleteConfirm: '确定删除此 Skill？',
     deleteFailed: '删除失败: {msg}',
@@ -42,17 +39,8 @@ export const skillsNS = {
       editTitle: '编辑 Skill',
       name: '名称 *',
       namePlaceholder: '例如: web_summary, text_stats',
-      typeInstructionOption: '指令型（注入 system prompt）',
-      typeExecutableOption: '可执行型（作为工具调用）',
       content: '指令正文（markdown）',
-      contentPlaceholderInstruction: '写一段给模型的指令，例如：你是写作助手，输出前先列出大纲……',
-      contentPlaceholderExecutable: '可选：为这个可执行工具补充调用说明，注入 system prompt',
-      command: '执行命令',
-      commandPlaceholder: '例如: python3 /path/to/script.py',
-      args: '参数（空格分隔）',
-      argsPlaceholder: '例如: --max-len 2000',
-      env: '环境变量（每行一个，KEY=VALUE）',
-      envPlaceholder: 'API_KEY=xxx',
+      contentPlaceholder: '写一段给模型的指令，例如：你是写作助手，输出前先列出大纲……；需要运行脚本时写明脚本路径与命令用法',
       descPlaceholder: '简要描述该 Skill 的功能',
       nameRequired: '请输入名称',
       saveFailed: '保存失败: {msg}',
@@ -84,12 +72,9 @@ export const skillsNS = {
     importSkill: '+ Import skill',
     emptyTitle: 'No skills yet',
     emptyDesc:
-      'Skills are reusable capability packs: instruction skills are injected into the system prompt, executable ones are exposed to the model as tools. Use the buttons above to create or import one.',
+      'Skills are reusable capability packs: instructions injected into the system prompt, optionally bundled with scripts that the model runs via run_command. Use the buttons above to create or import one.',
 
     updatedAt: 'Updated',
-
-    typeInstruction: 'Instruction',
-    typeExecutable: 'Executable',
 
     deleteConfirm: 'Delete this skill?',
     deleteFailed: 'Failed to delete: {msg}',
@@ -122,19 +107,9 @@ export const skillsNS = {
       editTitle: 'Edit skill',
       name: 'Name *',
       namePlaceholder: 'e.g. web_summary, text_stats',
-      typeInstructionOption: 'Instruction (injected into the system prompt)',
-      typeExecutableOption: 'Executable (exposed to the model as a tool)',
       content: 'Instructions (markdown)',
-      contentPlaceholderInstruction:
-        'Write instructions for the model, e.g. “You are a writing assistant — outline first, then draft…”',
-      contentPlaceholderExecutable:
-        'Optional: usage notes for this executable tool, injected into the system prompt',
-      command: 'Command',
-      commandPlaceholder: 'e.g. python3 /path/to/script.py',
-      args: 'Arguments (space-separated)',
-      argsPlaceholder: 'e.g. --max-len 2000',
-      env: 'Environment variables (one per line, KEY=VALUE)',
-      envPlaceholder: 'API_KEY=xxx',
+      contentPlaceholder:
+        'Write instructions for the model, e.g. “You are a writing assistant — outline first, then draft…”; if scripts are involved, document their paths and usage',
       descPlaceholder: 'Briefly describe what this skill does',
       nameRequired: 'Please enter a name',
       saveFailed: 'Failed to save: {msg}',

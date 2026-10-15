@@ -186,11 +186,15 @@ func Transaction(fn func(tx *gorm.DB) error) error {
 	return d.Transaction(fn)
 }
 
-// Migrate 自动迁移表结构
+// Migrate 自动迁移表结构，并清理已从模型移除的遗留列（见 legacy_columns.go）。
 func Migrate(models ...interface{}) error {
 	d := DB()
 	if d == nil {
 		return fmt.Errorf("database not initialized")
 	}
-	return d.AutoMigrate(models...)
+	if err := d.AutoMigrate(models...); err != nil {
+		return err
+	}
+	dropLegacyColumns(d)
+	return nil
 }

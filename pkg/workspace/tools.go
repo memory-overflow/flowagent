@@ -470,7 +470,7 @@ func shellCommand() (name, flag string) {
 func ShellHint() string {
 	switch runtime.GOOS {
 	case "windows":
-		return "当前运行环境是 Windows，请在 run_command / shell 等工具里使用 Windows cmd 兼容的命令（例如 dir、type、copy、del、mkdir，而不是 ls、cat、cp、rm、chmod），路径用反斜杠 \\。Python 命令请用 python（不要用 python3，Windows 上这个名字不可靠）；带空格的路径参数用双引号包裹。"
+		return "当前运行环境是 Windows，请在 run_command 里使用 Windows cmd 兼容的命令（例如 dir、type、copy、del、mkdir，而不是 ls、cat、cp、rm、chmod），路径用反斜杠 \\。Python 命令请用 python（不要用 python3，Windows 上这个名字不可靠）；带空格的路径参数用双引号包裹。"
 	case "darwin":
 		return "当前运行环境是 macOS，请使用 Unix shell 兼容的命令（bash/zsh，例如 ls、cat、cp、rm）。"
 	default:

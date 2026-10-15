@@ -1175,7 +1175,7 @@ func callNames(calls []llm.ToolCall) []string {
 //   - mcpServerDAO 取 MCP server 配置
 //   - registry     MCP 工具注册表（须与 tool_call actuator 共享同一实例，
 //     保证暴露给 LLM 的工具名在 tool_call 侧能反查到）
-//   - convSkillDAO 查对话绑定的 Skill（prompt 型注入 system prompt，command 型作为工具）
+//   - convSkillDAO 查对话绑定的 Skill（注入 system prompt）
 //   - skillDAO     取 Skill 配置
 //   - defaultMCP   框架级 MCP server（fetch 精读，仅 deep_search 子任务注入；可空）
 //

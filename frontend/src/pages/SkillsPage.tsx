@@ -10,37 +10,8 @@ import {
   importSkillMD,
   type BuiltinSkillItem,
 } from '../services/api';
-import type { SkillConfig, SkillType } from '../types/api';
+import type { SkillConfig } from '../types/api';
 import { useT } from '../i18n';
-
-// 后端 args/env 存储为 JSON 字符串，解析时兼容两种形态
-function parseJsonArray(v: unknown): string[] {
-  if (Array.isArray(v)) return v as string[];
-  if (typeof v === 'string' && v.trim()) {
-    try {
-      const arr = JSON.parse(v);
-      return Array.isArray(arr) ? (arr as string[]) : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
-function parseJsonObject(v: unknown): Record<string, string> {
-  if (v && typeof v === 'object' && !Array.isArray(v)) {
-    return v as Record<string, string>;
-  }
-  if (typeof v === 'string' && v.trim()) {
-    try {
-      const obj = JSON.parse(v);
-      return obj && typeof obj === 'object' && !Array.isArray(obj) ? (obj as Record<string, string>) : {};
-    } catch {
-      return {};
-    }
-  }
-  return {};
-}
 
 export default function SkillsPage() {
   const t = useT();
@@ -79,11 +50,6 @@ export default function SkillsPage() {
     }
   };
 
-  const typeBadge: Record<number, { cls: string; label: string }> = {
-    1: { cls: 'badge-info', label: t('skills.typeInstruction') },
-    2: { cls: 'badge-success', label: t('skills.typeExecutable') },
-  };
-
   return (
     <div className="page-container">
       <div className="page-header">
@@ -111,7 +77,6 @@ export default function SkillsPage() {
           <thead>
             <tr>
               <th>{t('common.name')}</th>
-              <th>{t('common.type')}</th>
               <th>{t('common.desc')}</th>
               <th>{t('skills.updatedAt')}</th>
               <th>{t('common.action')}</th>
@@ -121,11 +86,6 @@ export default function SkillsPage() {
             {skills.map((s) => (
               <tr key={s.id}>
                 <td style={{ fontWeight: 500 }}>{s.name_display || s.name}</td>
-                <td>
-                  <span className={`badge ${typeBadge[s.type]?.cls || 'badge-muted'}`}>
-                    {typeBadge[s.type]?.label || t('common.unknown')}
-                  </span>
-                </td>
                 <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {s.description_display || s.description || '-'}
                 </td>
@@ -336,39 +296,19 @@ function SkillForm({
 }) {
   const t = useT();
   const [name, setName] = useState(skill?.name || '');
-  const [type, setType] = useState<SkillType>(skill?.type ?? 1);
   const [description, setDescription] = useState(skill?.description || '');
   const [content, setContent] = useState(skill?.content || '');
-  const [command, setCommand] = useState(skill?.command || '');
-  const [args, setArgs] = useState(parseJsonArray(skill?.args).join(' '));
-  const [env, setEnv] = useState(
-    Object.entries(parseJsonObject(skill?.env)).map(([k, v]) => `${k}=${v}`).join('\n')
-  );
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
     if (!name.trim()) return alert(t('skills.form.nameRequired'));
     setSaving(true);
     try {
-      const envObj: Record<string, string> = {};
-      if (env.trim()) {
-        env.split('\n').forEach((line) => {
-          const idx = line.indexOf('=');
-          if (idx > 0) envObj[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
-        });
-      }
-
-      const payload: any = {
+      const payload = {
         name: name.trim(),
         description: description.trim(),
-        type,
         content: content,
       };
-      if (type === 2) {
-        payload.command = command.trim() || undefined;
-        payload.args = args.trim() ? args.trim().split(/\s+/) : undefined;
-        payload.env = Object.keys(envObj).length > 0 ? envObj : undefined;
-      }
 
       if (skill?.id) {
         const res = await updateSkill(skill.id, payload);
@@ -395,42 +335,15 @@ function SkillForm({
         </div>
 
         <div className="form-group">
-          <label>{t('common.type')}</label>
-          <select className="form-select" value={type} onChange={(e) => setType(Number(e.target.value) as SkillType)}>
-            <option value={1}>{t('skills.form.typeInstructionOption')}</option>
-            <option value={2}>{t('skills.form.typeExecutableOption')}</option>
-          </select>
-        </div>
-
-        <div className="form-group">
           <label>{t('skills.form.content')}</label>
           <textarea
             className="form-textarea"
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            placeholder={type === 1
-              ? t('skills.form.contentPlaceholderInstruction')
-              : t('skills.form.contentPlaceholderExecutable')}
+            placeholder={t('skills.form.contentPlaceholder')}
             style={{ minHeight: 100 }}
           />
         </div>
-
-        {type === 2 && (
-          <>
-            <div className="form-group">
-              <label>{t('skills.form.command')}</label>
-              <input className="form-input" value={command} onChange={(e) => setCommand(e.target.value)} placeholder={t('skills.form.commandPlaceholder')} />
-            </div>
-            <div className="form-group">
-              <label>{t('skills.form.args')}</label>
-              <input className="form-input" value={args} onChange={(e) => setArgs(e.target.value)} placeholder={t('skills.form.argsPlaceholder')} />
-            </div>
-            <div className="form-group">
-              <label>{t('skills.form.env')}</label>
-              <textarea className="form-textarea" value={env} onChange={(e) => setEnv(e.target.value)} placeholder={t('skills.form.envPlaceholder')} />
-            </div>
-          </>
-        )}
 
         <div className="form-group">
           <label>{t('common.desc')}</label>
@@ -506,11 +419,6 @@ function BuiltinSkillModal({
     }
   };
 
-  const typeLabel: Record<number, string> = {
-    1: t('skills.typeInstruction'),
-    2: t('skills.typeExecutable'),
-  };
-
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640 }}>
@@ -560,7 +468,6 @@ function BuiltinSkillModal({
                     <div style={{ flex: 1 }}>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <span style={{ fontWeight: 600 }}>{it.name_display || it.name}</span>
-                        <span className="badge badge-info" style={{ fontSize: 11 }}>{typeLabel[it.type] || t('common.unknown')}</span>
                         {it.already_imported && (
                           <span className="badge badge-muted" style={{ fontSize: 11 }}>{t('skills.builtin.exists')}</span>
                         )}
@@ -568,11 +475,6 @@ function BuiltinSkillModal({
                       {(it.description_display || it.description) && (
                         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
                           {it.description_display || it.description}
-                        </div>
-                      )}
-                      {it.command && (
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, fontFamily: 'monospace' }}>
-                          {it.command} {(it.args || []).join(' ')}
                         </div>
                       )}
                     </div>
