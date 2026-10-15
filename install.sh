@@ -262,14 +262,18 @@ fi
 # ── 6. 编译后端 ──
 step "6. 编译后端（bin/agent-server + bin/agent-scheduler）"
 mkdir -p bin
-# 国内直连 proxy.golang.org 极慢或被墙（go: downloading 长期无进展且不报错），
-# 未显式设置 GOPROXY 时默认走 goproxy.cn 优先的代理链（海外可正常回退）。
-export GOPROXY="${GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}"
-# GOTOOLCHAIN=auto：本机 Go 低于 go.mod 要求时自动下载对应工具链（系统包管理器装的
-# Go 常偏旧，靠它补齐版本）；Go 已 >= 1.25 时该变量无任何额外动作。
-GOTOOLCHAIN=auto go build -trimpath -o bin/agent-server ./cmd/server && ok "bin/agent-server"
-GOTOOLCHAIN=auto go build -trimpath -o bin/agent-scheduler ./cmd/scheduler && ok "bin/agent-scheduler"
-GOTOOLCHAIN=auto go build -trimpath -o bin/agent-supervisor ./cmd/supervisor && ok "bin/agent-supervisor"
+# GOPROXY / GOTOOLCHAIN / GOSUMDB 的统一兜底见 scripts/go-build-env.sh：
+# 国内直连 proxy.golang.org 极慢或被墙；系统包管理器装的 Go 常偏旧，需要 GOTOOLCHAIN=auto
+# 自动下载工具链，而工具链模块强制走 sumdb 校验（GOSUMDB=off 会直接失败）。
+# shellcheck source=scripts/go-build-env.sh
+source "${ROOT}/scripts/go-build-env.sh"
+prepare_go_build_env
+if go_build bin/agent-server ./cmd/server && go_build bin/agent-scheduler ./cmd/scheduler && go_build bin/agent-supervisor ./cmd/supervisor; then
+  ok "bin/agent-server / bin/agent-scheduler / bin/agent-supervisor"
+else
+  fail "后端编译失败，请先解决上面的错误再继续（依赖与配置步骤仍会继续执行）"
+  MISSING=1
+fi
 
 # ── 7. 前端依赖 ──
 step "7. 安装前端依赖（frontend/node_modules）"

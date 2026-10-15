@@ -42,13 +42,15 @@ fi
 if [ ! -x bin/agent-server ] || [ ! -x bin/agent-scheduler ] || [ ! -x bin/agent-supervisor ]; then
   echo "编译后端..."
   mkdir -p bin
-  # 国内直连 proxy.golang.org 极慢或被墙，未显式设置 GOPROXY 时默认 goproxy.cn 优先。
-  export GOPROXY="${GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}"
-  # GOTOOLCHAIN=auto：本机 Go 低于 go.mod 要求（1.25.5）时自动下载对应工具链，
-  # 覆盖 GOTOOLCHAIN=local/off 的环境（Go 已 >= 1.25 时该变量无任何额外动作）。
-  GOTOOLCHAIN=auto go build -trimpath -o bin/agent-server ./cmd/server || { fail "编译 agent-server 失败"; exit 1; }
-  GOTOOLCHAIN=auto go build -trimpath -o bin/agent-scheduler ./cmd/scheduler || { fail "编译 agent-scheduler 失败"; exit 1; }
-  GOTOOLCHAIN=auto go build -trimpath -o bin/agent-supervisor ./cmd/supervisor || { fail "编译 agent-supervisor 失败"; exit 1; }
+  # GOPROXY / GOTOOLCHAIN / GOSUMDB 的统一兜底见 scripts/go-build-env.sh
+  #（国内直连 proxy.golang.org 会卡死在 go: downloading；工具链模块又强制走 sumdb 校验，
+  #  GOSUMDB=off 会报 "checksum database disabled by GOSUMDB=off"）。
+  # shellcheck source=scripts/go-build-env.sh
+  source "${ROOT}/scripts/go-build-env.sh"
+  prepare_go_build_env
+  go_build bin/agent-server ./cmd/server || { fail "编译 agent-server 失败"; exit 1; }
+  go_build bin/agent-scheduler ./cmd/scheduler || { fail "编译 agent-scheduler 失败"; exit 1; }
+  go_build bin/agent-supervisor ./cmd/supervisor || { fail "编译 agent-supervisor 失败"; exit 1; }
 fi
 
 # ── 4. 前端依赖 ──
