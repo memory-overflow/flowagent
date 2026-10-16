@@ -22,7 +22,7 @@ flowagent 是一个对话驱动的全局工作流编排框架：把自然语言�
 
 快速演示核心流程：添加模型 → 发起对话 → 规划出 DAG 工作流 → 并行执行 → 查看结果。
 
-<video src="docs/demo.mp4" autoplay muted loop playsinline width="372"></video>
+![flowagent demo](docs/demo.gif)
 
 > ▶ 观看完整演示视频：[YouTube](https://www.youtube.com/watch?v=qaGT4dynJek)
 

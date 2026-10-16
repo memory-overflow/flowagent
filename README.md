@@ -22,7 +22,7 @@ A conversation-driven workflow orchestration framework — turn natural-language
 
 A quick walkthrough of the core loop: add a model, start a conversation, and watch flowagent plan the request into a DAG workflow and execute it in parallel.
 
-<video src="docs/demo.mp4" autoplay muted loop playsinline width="372"></video>
+![flowagent demo](docs/demo.gif)
 
 > ▶ Watch the full walkthrough on [YouTube](https://www.youtube.com/watch?v=qaGT4dynJek)
 
