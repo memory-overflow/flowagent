@@ -24,7 +24,7 @@ flowagent 是一个对话驱动的全局工作流编排框架：把自然语言�
 
 ![flowagent demo](docs/demo.gif)
 
-> ▶ 观看完整演示视频（约 9 分钟）：[YouTube](https://www.youtube.com/watch?v=11F32rEWOZQ)
+> ▶ 观看完整演示视频：[YouTube](https://www.youtube.com/watch?v=qaGT4dynJek)
 
 ## 快速开始
 
