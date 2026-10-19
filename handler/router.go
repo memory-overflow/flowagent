@@ -114,6 +114,8 @@ func RegisterRoutes(router *gin.RouterGroup) {
 		skill.POST("/import-builtins", Wrap(ImportBuiltinSkillBinder, ImportBuiltinSkill))
 		// zip 整体导入是 multipart（Wrap 走 JSON 绑定），与 files/upload 同理绕过 Wrap
 		skill.POST("/import-zip", ImportSkillZip)
+		// 单个 SKILL.md 文件导入（prompt 型 skill）
+		skill.POST("/import-md", ImportSkillMD)
 	}
 
 	// ========== 文件模块 ==========
@@ -126,6 +128,10 @@ func RegisterRoutes(router *gin.RouterGroup) {
 		files.GET("/download", DownloadFile)
 		// 本地打开：用系统默认应用打开工作区文件（替换浏览器「下载」）
 		files.GET("/open", OpenFile)
+		// 定位文件：在文件管理器中打开所在目录并选中该文件
+		files.GET("/reveal", RevealFile)
+		// 打开当前对话的工作空间目录
+		files.GET("/open-workspace", OpenWorkspace)
 	}
 
 	// ========== 内部接口（scheduler → server 回调，不对外） ==========

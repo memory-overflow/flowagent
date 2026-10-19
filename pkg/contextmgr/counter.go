@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode"
 
 	"github.com/memory-overflow/flowagent/pkg/llm"
@@ -28,6 +29,8 @@ import (
 // 下载 BPE 词典。本服务跑在内网，下载可能直接失败。届时若让计数器返回
 // error 并中断调用链，等于让「上下文管理」这个增强特性反过来搞挂主流程。
 // 所以降级成估算 —— 精度下降但链路不断。
+//
+// 同一套兜底也覆盖「词典正在后台下载」的启动窗口，见 GetCounter / WarmCounter。
 
 // tiktokenEncoding 统一用 o200k_base。
 //
@@ -49,7 +52,7 @@ type Counter struct {
 }
 
 var (
-	globalCounter     *Counter
+	globalCounter     atomic.Pointer[Counter]
 	globalCounterOnce sync.Once
 )
 
@@ -58,18 +61,40 @@ var (
 // 编码对象构建一次（要解析几十万条 BPE 规则，不可每次新建），
 // 之后所有调用复用。初始化失败时返回已降级的计数器，而非 nil ——
 // 调用方不必处理 error，拿到的永远是个可用对象。
+//
+// 首次调用**立即返回**：先挂上启发式估算的兜底计数器，精确编码在后台加载，
+// 完成后原子替换。原因是词典加载要下载 o200k_base（约 3.4MB）并解析几十万条
+// BPE 规则，慢网下实测可耗时近一分钟（见 WarmCounter）—— 若同步等待，这段
+// 时间会落在「用户首个任务」的上下文组装上，用户看到的是几十秒无响应。
+// 降级窗口内计数走启发式估算，与本包既有的失败兜底口径一致。
 func GetCounter() *Counter {
 	globalCounterOnce.Do(func() {
-		pinCacheDir()
-		enc, err := tiktoken.GetEncoding(tiktokenEncoding)
-		if err != nil {
-			log.Printf("[contextmgr] tiktoken 初始化失败，降级为启发式估算: %v", err)
-			globalCounter = &Counter{degraded: true}
-			return
-		}
-		globalCounter = &Counter{enc: enc}
+		globalCounter.Store(&Counter{degraded: true})
+		go loadEncoder()
 	})
-	return globalCounter
+	return globalCounter.Load()
+}
+
+// WarmCounter 预热计数器：在服务启动期提前触发词典下载与 BPE 规则解析，
+// 把首次使用的昂贵开销从「用户首个任务」挪到启动阶段。
+//
+// 内部走与首次调用同一条路径，本身不阻塞；调用方仍应用 goroutine 包一层，
+// 与 mcppkg.PrewarmBuiltins 的启动预热并排执行。
+func WarmCounter() { GetCounter() }
+
+// loadEncoder 后台下载并解析 BPE 词典，成功后原子替换全局计数器。
+//
+// 失败只降级记日志：计数器保持启发式估算，上下文管理链路不断
+// （tiktoken-go 首次使用某编码要从 OpenAI 公网 blob 拉词典，内网可能不可达）。
+func loadEncoder() {
+	pinCacheDir()
+	enc, err := tiktoken.GetEncoding(tiktokenEncoding)
+	if err != nil {
+		log.Printf("[contextmgr] tiktoken 初始化失败，降级为启发式估算: %v", err)
+		return
+	}
+	globalCounter.Store(&Counter{enc: enc})
+	log.Printf("[contextmgr] tiktoken 就绪（%s），token 计数切换为精确 BPE 分词", tiktokenEncoding)
 }
 
 // pinCacheDir 把 BPE 词典缓存目录固定到用户缓存目录。

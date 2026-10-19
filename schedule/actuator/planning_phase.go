@@ -45,6 +45,7 @@ import (
 	"github.com/memory-overflow/flowagent/model"
 	"github.com/memory-overflow/flowagent/pkg/llm"
 	skillpkg "github.com/memory-overflow/flowagent/pkg/skill"
+	workspacepkg "github.com/memory-overflow/flowagent/pkg/workspace"
 	"github.com/memory-overflow/flowagent/schedule/container"
 )
 
@@ -558,7 +559,7 @@ func planningPhaseImpl(ctx context.Context, temp *model.TaskTemp) (data interfac
 	// （如 pdfkit CLI），否则只能退回 run_command 硬解 —— 实测 PDF 任务在规划期
 	// 因拿不到 pdfkit 指令，用 pdftotext（系统未装）/ python（Python2）反复失败，
 	// 4 轮调研预算耗尽仍未收口。prompt 型 skill 不变成工具，只能靠这里注入。
-	systemPrompt := planningSystemPrompt + "\n\n" + imagePolicySection(ctx, temp.ChatID, toolSet) + "\n\n" + renderAvailableTools(toolSet)
+	systemPrompt := planningSystemPrompt + "\n\n" + workspacepkg.ShellHint() + "\n\n" + imagePolicySection(ctx, temp.ChatID, toolSet) + "\n\n" + renderAvailableTools(toolSet)
 	if skillConfigs, sErr := funcCallRegistry.toolProvider.LoadSkills(ctx, temp.ChatID); sErr != nil {
 		log.Printf("[func-call-actuator][%s] load skills for planning failed (ignore): %v", temp.TaskID, sErr)
 	} else if section := skillpkg.BuildPromptSection(skillConfigs); section != "" {

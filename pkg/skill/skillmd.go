@@ -47,6 +47,17 @@ func parseSkillMD(content string) (name, description, body string, err error) {
 	return strings.TrimSpace(fm.Name), strings.TrimSpace(fm.Description), body, nil
 }
 
+// ParseSkillMarkdown 解析单个 SKILL.md 文件（CodeBuddy/社区格式），返回
+// name / description / body / key。key 由 name sanitize 而来（与 zip 导入的
+// 落地目录命名一致）。供 .md 单文件导入复用。
+func ParseSkillMarkdown(content string) (name, description, body, key string, err error) {
+	n, d, b, err := parseSkillMD(content)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	return n, d, b, sanitizeSkillKey(n), nil
+}
+
 // skillMDInfo 一个 SKILL.md 的解析结果；dir 为包内目录（根为 "."）。
 type skillMDInfo struct {
 	dir  string

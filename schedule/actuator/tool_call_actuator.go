@@ -1,7 +1,7 @@
 // Package actuator — ToolCall 阶段执行器
 //
 // ToolCallActuator 执行上一轮 functional_call 中 LLM 请求的工具调用
-// （内置 native 工具 / MCP 工具 / command 型 skill 三类）。
+// （内置 native 工具 / MCP 工具两类）。
 //
 // 单次执行流程：
 //  1. 从 task_turn 读回最近一次 functional_call 的 LLM 输出，取出 tool_calls
@@ -35,7 +35,6 @@ import (
 	"github.com/memory-overflow/flowagent/pkg/llm"
 	"github.com/memory-overflow/flowagent/pkg/llmreg"
 	mcppkg "github.com/memory-overflow/flowagent/pkg/mcp"
-	skillpkg "github.com/memory-overflow/flowagent/pkg/skill"
 	"github.com/memory-overflow/flowagent/pkg/stream"
 	workspacepkg "github.com/memory-overflow/flowagent/pkg/workspace"
 	"github.com/memory-overflow/flowagent/schedule/container"
@@ -349,7 +348,7 @@ func executeOneToolCall(
 		return false, nil
 	}
 
-	// 按来源分发执行，但落库逻辑共享：MCP 与 Skill 都归一成
+	// 按来源分发执行，但落库逻辑共享：MCP 与内置工具都归一成
 	// (content, isError, raw, execErr) 四元组，再统一 Finish/Fail。
 	serverName := entryServerName(entry)
 	turn, err := toolCallRegistry.turnDAO.BeginTurn(ctx, dao.BeginTurnParams{
@@ -434,7 +433,7 @@ func executeOneToolCall(
 		return false, nil
 	}
 
-	// 业务错误（仅 MCP 工具可能有；skill 的失败一律走 execErr）
+	// 业务错误（仅 MCP 工具可能有；内置工具的失败一律走 execErr）
 	if isError {
 		if strings.TrimSpace(content) == "" {
 			content = "工具返回错误但未提供详情"
@@ -474,7 +473,7 @@ func executeOneToolCall(
 }
 
 // entryServerName 返回工具条目在 turn 记录里的「来源名」。
-// MCP 用 server 名，Skill 用 skill 名（命名空间 skill 已体现在 ToolName 里），
+// MCP 用 server 名，
 // 内置 native 工具默认标注 builtin；若工具声明了 Label（如 web_search 的检索引擎名），
 // 则优先用 Label，便于调试页直接看出用了哪个具体来源。
 func entryServerName(entry *ToolEntry) string {
@@ -485,10 +484,6 @@ func entryServerName(entry *ToolEntry) string {
 	case toolKindMCP:
 		if entry.MCP != nil {
 			return entry.MCP.Server.ServerName
-		}
-	case toolKindSkill:
-		if entry.Skill != nil {
-			return entry.Skill.Name
 		}
 	case toolKindBuiltin:
 		if entry.Builtin != nil && entry.Builtin.Label != "" {
@@ -523,16 +518,6 @@ func runToolEntry(
 			return "", false, nil, callErr
 		}
 		return materializeMCPImages(result.Content, result.Images, wsDir), result.IsError, mcppkg.SanitizeRaw(result.Raw), nil
-
-	case toolKindSkill:
-		input := skillInputFromArgs(call.Arguments)
-		callCtx, cancel := context.WithTimeout(ctx, skillpkg.DefaultTimeout)
-		out, execErr := skillpkg.Execute(callCtx, entry.Skill, input)
-		cancel()
-		if execErr != nil {
-			return "", false, nil, execErr
-		}
-		return out, false, nil, nil
 
 	case toolKindBuiltin:
 		if entry.Builtin == nil {
@@ -678,19 +663,6 @@ func resolveWorkspaceDir(temp *model.TaskTemp) string {
 		key = temp.TaskID
 	}
 	return toolCallRegistry.ws.Dir(key)
-}
-
-// skillInputFromArgs 从 skill 工具调用入参里取出 input 文本（经 stdin 传给子进程）。
-func skillInputFromArgs(args map[string]interface{}) string {
-	if args == nil {
-		return ""
-	}
-	if v, ok := args["input"]; ok {
-		if s, ok := v.(string); ok {
-			return s
-		}
-	}
-	return ""
 }
 
 // extractToolSummary 从工具调用入参里提取框架注入的 summary 元参数，
@@ -857,7 +829,7 @@ func publishToolCalling(taskID string, turnID int64, turnSeq int32, toolName str
 //   - mcpServerDAO  取 MCP server 配置
 //   - registry      MCP 工具注册表（必须与 functional_call actuator 共享同一实例，
 //     否则工具名反查会 miss）
-//   - convSkillDAO  查对话绑定的 Skill（command 型作为工具执行）
+//   - convSkillDAO  查对话绑定的 Skill（供 system prompt 注入）
 //   - skillDAO      取 Skill 配置
 //   - ws            工作区管理器（内置 native 工具执行时解析任务工作目录）
 //   - defaultMCP    框架级 MCP server（fetch 精读，仅 deep_search 子任务注入；可空）

@@ -7,6 +7,12 @@ import (
 	"syscall"
 )
 
+// buildShellCmd 构造在 shell 里执行用户命令的子进程（Unix：sh -c）。
+// Windows 版见 process_windows.go —— 那边必须绕过 EscapeArg 直传原始命令行。
+func buildShellCmd(userCmd string) *exec.Cmd {
+	return exec.Command("sh", "-c", userCmd)
+}
+
 // setProcessGroup 让命令自成一个进程组（PGID = 子进程 PID）。
 //
 // 为什么必须：run_command 跑的是 `sh -c <cmd>`，sh 会把管道里的 find/head、

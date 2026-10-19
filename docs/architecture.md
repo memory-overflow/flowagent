@@ -144,7 +144,7 @@ flowagent/
 │   ├── llmreg/        # 模型配置 → llm.Client 的解析器（含 TTL 缓存）
 │   ├── contextmgr/    # 上下文水位度量与压缩决策（token 上限表）
 │   ├── mcp/           # MCP 工具协议（连接/ListTools/CallTool + Registry）
-│   ├── skill/         # Skill 系统（prompt 型 + command 型 + 安全拦截）
+│   ├── skill/         # Skill 系统（prompt 注入 + 导入 + 危险命令检测）
 │   ├── stream/        # 进程内事件 Hub + 跨进程 HTTP 转发
 │   └── workspace/     # 工作区管理 + 内置 native 工具（沙箱约束）
 ├── mcp/builtins/      # 内置 MCP 清单（fetch/playwright/filesystem/...）
@@ -320,19 +320,20 @@ agent loop 每次进入 functional_call 都要拿到「截至目前的完整对�
 
 ### 5.7 工具体系（`pkg/mcp` + `pkg/skill` + `pkg/workspace`）
 
-工具来源有三类，统一抽象成 `ToolEntry`（在 `schedule/actuator/tool_provider.go` 聚合）：
+工具来源有两类，统一抽象成 `ToolEntry`（在 `schedule/actuator/tool_provider.go` 聚合）：
 
 | 来源 | 命名空间 | 执行方式 | 默认可用 |
 |---|---|---|---|
 | 内置 native 工具 | 无前缀（`write_file` 等） | 当前进程内 Go 原生执行 | 是 |
 | MCP 工具 | `<server>__<tool>` | MCP 协议（握手 + 子进程） | 按对话绑定 |
-| Skill 工具 | `skill__<name>` | 本地 shell 子进程 | 按对话绑定 |
+
+Skill 不是工具来源，只注入 system prompt（见下）。
 
 **MCP（`pkg/mcp`）**：封装 MCP 客户端，支持 `stdio` / `sse` / `streamable_http` 三种传输。连接是「用完即走」的短连接模式（无状态、无需处理重连）。`Registry` 按对话缓存工具清单（默认 30min TTL），并解决跨 server 工具重名问题（对外名字加 `<server>__` 前缀，`<server>__<tool>` 反查回真实 server）。
 
-**Skill（`pkg/skill`）**：本地能力包。prompt 型直接注入 system prompt，command 型用本地 shell 子进程执行（stdin 传输入、stdout 取结果）。执行前有危险删除命令拦截（`DetectDangerousCommand`），并自动激活项目级 venv。
+**Skill（`pkg/skill`）**：本地能力包，对齐行业通行的 Agent Skills（SKILL.md）模式：skill = 一段指令 + 可选随包脚本，不区分类型、不注册为工具。指令注入 system prompt（随包脚本的 `skills/` 相对路径会被绝对化），模型按指令自行拼命令，通过内置 `run_command` 执行脚本；危险删除拦截（`DetectDangerousCommand`）与项目 venv 的 PATH 注入都在 `run_command` 里完成。
 
-**内置 native 工具（`pkg/workspace`）**：补上第三类能力——Go 原生实现的文件/命令/时间工具，默认对全部对话可用：
+**内置 native 工具（`pkg/workspace`）**：补上框架内核能力——Go 原生实现的文件/命令/时间工具，默认对全部对话可用：
 
 ```
 write_file / read_file / list_dir / create_dir / file_exists /

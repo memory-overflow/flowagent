@@ -19,6 +19,7 @@ import {
   listModels,
   updateConversationModel,
   updateConversationTitle,
+  openWorkspace,
   setActiveWorkflow,
   subscribeTaskStream,
 } from '../services/api';
@@ -1111,6 +1112,14 @@ function ChatHeader({
     }
   };
 
+  const openWorkspaceDir = async () => {
+    try {
+      await openWorkspace(chatInfo.chat_id);
+    } catch (err: any) {
+      alert(t('chat.openWorkspaceFailed', { msg: err?.message || t('chat.unknownError') }));
+    }
+  };
+
   return (
     <div className="chat-header">
       {editing ? (
@@ -1165,6 +1174,13 @@ function ChatHeader({
             {t('chat.workflow')}
           </button>
         )}
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={openWorkspaceDir}
+          title={t('chat.openWorkspaceTitle')}
+        >
+          {t('chat.openWorkspace')}
+        </button>
         <button className="btn btn-ghost btn-sm" onClick={onRefresh}>{t('common.refresh')}</button>
       </div>
     </div>

@@ -8,22 +8,64 @@ REM   exit, escape-restart endpoint :9090) + frontend (vite dev)
 REM
 REM Usage: start.bat
 REM Prereq: run install.bat first; config\config.yaml is configured.
+REM
+REM The console window always waits for a key press before closing, whether the
+REM launch succeeded or failed.
 REM ============================================================================
 setlocal
 cd /d "%~dp0"
 
+REM Use project-local portable runtimes installed by install.bat (if any).
+if exist "%~dp0.tools\go\bin" set "PATH=%~dp0.tools\go\bin;%PATH%"
+if exist "%~dp0.tools\node" set "PATH=%~dp0.tools\node;%PATH%"
+if exist "%~dp0.tools\python" set "PATH=%~dp0.tools\python;%~dp0.tools\python\Scripts;%PATH%"
+REM .tools\git\cmd must be on PATH for the built-in git MCP server (it shells
+REM out to a plain "git" command). Harmless when a system Git is already present.
+if exist "%~dp0.tools\git\cmd" set "PATH=%~dp0.tools\git\cmd;%PATH%"
+
+call :main %*
+set "RC=%errorlevel%"
+
+echo.
+if "%RC%"=="0" (
+    echo === Launch finished ===
+    echo Close each of the opened windows to stop the corresponding process.
+) else (
+    echo === LAUNCH FAILED ^(exit code %RC%^) ===
+    echo Fix the problem reported above, then run start.bat again.
+)
+
+echo.
+echo Press any key to close this window ...
+pause >nul
+endlocal & exit /b %RC%
+
+REM ---------------------------------------------------------------------------
+REM  Main flow
+REM ---------------------------------------------------------------------------
+:main
 echo === flowagent launcher ===
 
 REM --- 1. Runtime check ---
-where go >nul 2>nul
-if %errorlevel% neq 0 (
-    echo [FAIL] Go not found. Run install.bat first.
+set "GOVER="
+for /f "tokens=3" %%v in ('go version 2^>nul') do if not defined GOVER set "GOVER=%%v"
+if not defined GOVER (
+    echo [FAIL] Go not found or not runnable. Run install.bat first.
     exit /b 1
 )
-where node >nul 2>nul
-if %errorlevel% neq 0 (
-    echo [FAIL] Node.js not found. Run install.bat first.
+set "NODEVER="
+for /f "tokens=1" %%v in ('node --version 2^>nul') do if not defined NODEVER set "NODEVER=%%v"
+if not defined NODEVER (
+    echo [FAIL] Node.js not found or not runnable. Run install.bat first.
     exit /b 1
+)
+set "GITVER="
+for /f "tokens=1,2,3" %%a in ('git --version 2^>^&1') do if not defined GITVER if /i "%%a"=="git" if /i "%%b"=="version" set "GITVER=%%c"
+if defined GITVER (
+    echo [OK] Go %GOVER% / Node %NODEVER% / Git %GITVER%
+) else (
+    echo [OK] Go %GOVER% / Node %NODEVER%
+    echo [--] Git not found - the git MCP server will be unavailable ^(re-run install.bat to auto-install^)
 )
 
 REM --- 2. Config check ---
@@ -34,9 +76,10 @@ if not exist config\config.yaml (
 )
 
 REM --- 3. Build if missing ---
-if not exist bin\agent-server.exe (
+if not exist bin\agent-supervisor.exe (
     echo Building backend...
     if not exist bin mkdir bin
+    if not defined GOPROXY set "GOPROXY=https://goproxy.cn,https://proxy.golang.org,direct"
     go build -trimpath -o bin\agent-server.exe ./cmd/server
     go build -trimpath -o bin\agent-scheduler.exe ./cmd/scheduler
     go build -trimpath -o bin\agent-supervisor.exe ./cmd/supervisor
@@ -55,5 +98,9 @@ echo Launching supervisor (server + scheduler) and frontend...
 start "flowagent-supervisor" cmd /k "bin\agent-supervisor.exe -config config\config.yaml"
 start "flowagent-frontend" cmd /k "cd frontend && npm run dev"
 
-echo Done. Close each window to stop the corresponding process.
-endlocal
+REM 前端起来后自动打开浏览器（vite 冷启动需数秒，后台延迟打开，失败不阻断）
+start "" cmd /c "timeout /t 6 /nobreak >nul & start http://localhost:3000"
+
+echo Done. The web UI will open at http://localhost:3000 automatically.
+echo Close each window to stop the corresponding process.
+exit /b 0

@@ -308,8 +308,11 @@ func resolveTestConfig(ctx context.Context, r *TestMCPServerRequest) (*resolvedC
 		}
 		cfg := &resolvedConfig{
 			Transport: s.Transport,
-			Command:   s.Command,
-			URL:       s.URL,
+			// DB 里存的是清单原样的 command（内置 MCP 为 .venv/bin/python），
+			// 必须按当前平台换算，否则 Windows 上测试必然报
+			// 「executable file not found in %PATH%」。
+			Command: pkgmcp.NormalizeCommand(s.Command),
+			URL:     s.URL,
 		}
 		cfg.Args = parseStringSlice(s.Args)
 		cfg.Env = envMapToSlice(parseStringMap(s.Env))
@@ -323,7 +326,7 @@ func resolveTestConfig(ctx context.Context, r *TestMCPServerRequest) (*resolvedC
 	}
 	cfg := &resolvedConfig{
 		Transport: r.Transport,
-		Command:   r.Command,
+		Command:   pkgmcp.NormalizeCommand(r.Command),
 		URL:       r.URL,
 		Args:      r.Args,
 		Env:       envMapToSlice(r.Env),
@@ -343,8 +346,9 @@ type resolvedConfig struct {
 
 // doTestConnection 真正执行 MCP 握手和 list tools。
 func doTestConnection(cfg *resolvedConfig) *TestMCPServerResponse {
-	// 设置 10s 超时
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// 与常规 MCP 操作同口径的超时。原先写死的 10s 对 npx / uvx 型 server 的
+	// 首次测试必然超时：那时包还没进本地缓存，握手之前先要下载，动辄几十秒。
+	ctx, cancel := context.WithTimeout(context.Background(), pkgmcp.DefaultTimeout)
 	defer cancel()
 
 	// 1. 构造 transport

@@ -98,6 +98,17 @@ export function openLocalFile(url: string) {
   return http.get<CommonResponse<null>>(openPath);
 }
 
+/** 在文件管理器中定位文件（打开所在目录并选中）。 */
+export function revealFile(url: string) {
+  const revealPath = url.replace('/api/v1/files/download', '/files/reveal');
+  return http.get<CommonResponse<null>>(revealPath);
+}
+
+/** 打开当前对话的工作空间目录。 */
+export function openWorkspace(chatId: string) {
+  return http.get<CommonResponse<null>>(`/files/open-workspace?chat_id=${encodeURIComponent(chatId)}`);
+}
+
 /** 发送消息。inputFiles 为 uploadFile 返回的 FileInfo 列表（已落盘工作区） */
 /**
  * 发送一条消息，创建对话任务。
@@ -671,11 +682,7 @@ export interface BuiltinSkillItem {
   /** 按界面语言折算的展示值（en 有翻译用翻译，否则回落中文）；列表渲染用这个 */
   name_display?: string;
   description_display?: string;
-  type: number;
   content?: string;
-  command?: string;
-  args?: string[];
-  env?: Record<string, string>;
   already_imported: boolean;
 }
 
@@ -714,6 +721,17 @@ export function importSkillZip(file: File, overwrite: boolean) {
   return http.post<CommonResponse<SkillZipImportResult>>('/skills/import-zip', form, {
     headers: { 'Content-Type': undefined as unknown as string },
     timeout: 120000,
+  });
+}
+
+/** 单个 SKILL.md 文件导入为 prompt 型 skill */
+export function importSkillMD(file: File, overwrite: boolean) {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('overwrite', String(overwrite));
+  return http.post<CommonResponse<SkillZipImportResult>>('/skills/import-md', form, {
+    headers: { 'Content-Type': undefined as unknown as string },
+    timeout: 30000,
   });
 }
 

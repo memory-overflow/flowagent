@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { FileInfo } from '../types/api';
-import { openLocalFile } from '../services/api';
+import { openLocalFile, revealFile } from '../services/api';
 import FilePreview, { previewKindFor } from './FilePreview';
 import { useT } from '../i18n';
 
@@ -80,6 +80,7 @@ export default function OutputFiles({ files, label, compact }: Props) {
   const t = useT();
   const [preview, setPreview] = useState<FileInfo | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
+  const [revealing, setRevealing] = useState<string | null>(null);
   // 产物过多时默认折叠：比如 PDF 转图片一次产出 13+ 张，全部平铺会把
   // 对话流撑出好几屏。默认只展示前 COLLAPSE_LIMIT 个，展开是显式动作。
   const overLimit = files.length > COLLAPSE_LIMIT;
@@ -97,6 +98,20 @@ export default function OutputFiles({ files, label, compact }: Props) {
       alert(t('files.openFailed', { msg: (e as Error).message }));
     } finally {
       setOpening(null);
+    }
+  };
+
+  /** 在文件管理器中定位文件（打开所在目录并选中）。 */
+  const reveal = async (f: FileInfo) => {
+    if (!f.url) return;
+    const key = f.path || f.name;
+    setRevealing(key);
+    try {
+      await revealFile(f.url);
+    } catch (e) {
+      alert(t('files.revealFailed', { msg: (e as Error).message }));
+    } finally {
+      setRevealing(null);
     }
   };
 
@@ -176,6 +191,21 @@ export default function OutputFiles({ files, label, compact }: Props) {
                   title={t('files.openX', { name: f.name })}
                 >
                   {opening === (f.path || f.name) ? t('files.opening') : t('files.open')}
+                </button>
+              )}
+
+              {f.url && (
+                <button
+                  type="button"
+                  className="file-card-action"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    reveal(f);
+                  }}
+                  disabled={revealing === (f.path || f.name)}
+                  title={t('files.revealX', { name: f.name })}
+                >
+                  {revealing === (f.path || f.name) ? t('files.revealing') : t('files.reveal')}
                 </button>
               )}
             </div>

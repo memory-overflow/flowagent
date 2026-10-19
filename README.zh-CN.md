@@ -12,6 +12,7 @@ flowagent 是一个对话驱动的全局工作流编排框架：把自然语言�
 - [功能特性](#功能特性)
 - [两种使用方式](#两种使用方式)
 - [API 概览](#api-概览)
+- [检索引擎](#检索引擎)
 - [文档](#文档)
 - [参与贡献](#参与贡献)
 - [Star 历史](#star-历史)
@@ -23,7 +24,7 @@ flowagent 是一个对话驱动的全局工作流编排框架：把自然语言�
 
 ![flowagent demo](docs/demo.gif)
 
-> ▶ 观看完整演示视频（约 9 分钟）：[YouTube](https://www.youtube.com/watch?v=11F32rEWOZQ)
+> ▶ 观看完整演示视频：[YouTube](https://www.youtube.com/watch?v=qaGT4dynJek)
 
 ## 快速开始
 
@@ -65,7 +66,7 @@ bash start.sh
 start.bat
 ```
 
-会拉起 agent-server + agent-scheduler + 前端。打开前端地址即可对话、查看 DAG 工作流。
+会拉起后端（supervisor → server + scheduler）与前端，并自动在浏览器打开 [http://localhost:3000](http://localhost:3000)。若未自动打开，可手动访问该地址。
 
 ### 3. 停止
 
@@ -154,6 +155,17 @@ curl -X POST http://localhost:8080/api/v1/tasks/detail \
 
 完整的数据结构定义见 [`api/v1/workflow_agent.proto`](api/v1/workflow_agent.proto)。
 
+## 检索引擎
+
+`web_search` / `deep_search` 使用可插拔的搜索引擎（由全局 search_config 配置，可在前端「搜索」页或 `POST /search-config/*` 接口设置）：
+
+| 引擎 | 是否需 key | 说明 |
+|---|---|---|
+| **baidu**（默认） | 否 | 零 key、开箱即用，中文内容覆盖好；但英文/国际内容覆盖较弱，高频调用可能触发安全验证 |
+| **serper** / **bocha** / **tavily** | 是 | 商业搜索 API，结果更稳定、结构化、英文覆盖好，需各自 API key |
+
+**百度与其他引擎的区别**：百度是免费零 key 的默认引擎，适合开箱体验与中文场景；商业 API（Serper / Bocha / Tavily）结果质量更高、结构化更好、对英文与国际化内容覆盖更强，适合生产与高质量检索，但需付费 key。未配置任何 key 时，系统自动回落百度。
+
 ## 文档
 
 - [技术架构与实现理念](docs/architecture.md) —— 整体的技术架构与实现理念，分模块详解整个 agent 的实现（代码目录结构也在这里）。
@@ -167,12 +179,21 @@ flowagent 是开源项目，欢迎一起开发。我们正在招募协作者，�
 - Fork 仓库后提交 pull request。
 - 有问题、有想法，或想成为维护者，欢迎联系：**zhengaohong@gmail.com**。
 
+### 待改进 / Roadmap
+
+框架仍在持续演进，以下方向尚待完善，欢迎社区共建：
+
+- **全局记忆**：目前缺乏跨对话的长期记忆（用户偏好、历史决策的沉淀），是下一步的重点方向。
+- **内置知识库**：暂未内置向量知识库，需要外挂知识库（RAG）技能来补足检索增强能力。
+
+如果你对以上任一方向感兴趣，欢迎认领 issue 或直接提交 PR，一起把 flowagent 做得更好。
+
 ## Star 历史
 
 [![Star History Chart](https://api.star-history.com/svg?repos=memory-overflow/flowagent&type=Date)](https://star-history.com/#memory-overflow/flowagent&Date)
 
 ## 许可证
 
-[Apache License 2.0](LICENSE)。
+[MIT License](LICENSE)。
 
-第三方组件许可详见 [NOTICE](NOTICE)。其中 `skills/pdfkit-py` 依赖 PyMuPDF（AGPL-3.0），该目录不受本仓库 Apache-2.0 覆盖，启用该 skill 需自行遵守 AGPL 条款。
+第三方组件许可详见 [NOTICE](NOTICE)。其中 `skills/pdfkit-py` 依赖 PyMuPDF（AGPL-3.0），该目录不受本仓库 MIT 许可证覆盖，启用该 skill 需自行遵守 AGPL 条款。

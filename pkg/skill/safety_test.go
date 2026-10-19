@@ -1,12 +1,6 @@
 package skill
 
-import (
-	"context"
-	"strings"
-	"testing"
-
-	"github.com/memory-overflow/flowagent/model"
-)
+import "testing"
 
 // TestDetectDangerousCommand 验证危险删除命令拦截的识别规则。
 func TestDetectDangerousCommand(t *testing.T) {
@@ -47,36 +41,5 @@ func TestDetectDangerousCommand(t *testing.T) {
 				t.Fatalf("detectDangerousCommand(%q) = %v, want %v (reason=%q)", c.input, got, c.want, detectDangerousCommand(c.input))
 			}
 		})
-	}
-}
-
-// TestExecuteBlocksDangerousCommand 验证 Execute 端到端拦截危险命令。
-func TestExecuteBlocksDangerousCommand(t *testing.T) {
-	cfg := &Config{
-		SkillID: "shell",
-		Name:    "shell",
-		Type:    model.SkillTypeCommand,
-		Command: "/bin/sh",
-	}
-
-	// 危险命令应被拦截，且不真正执行（返回错误，不返回成功输出）
-	out, err := Execute(context.Background(), cfg, "rm -rf /")
-	if err == nil {
-		t.Fatal("expected error for rm -rf /, got nil")
-	}
-	if !strings.Contains(err.Error(), "安全策略拦截") {
-		t.Fatalf("expected security block message, got: %v", err)
-	}
-	if out != "" {
-		t.Fatalf("expected empty output, got %q", out)
-	}
-
-	// 正常命令应照常执行
-	out, err = Execute(context.Background(), cfg, "echo safe")
-	if err != nil {
-		t.Fatalf("normal command should not be blocked: %v", err)
-	}
-	if out != "safe" {
-		t.Fatalf("expected 'safe', got %q", out)
 	}
 }

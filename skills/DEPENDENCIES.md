@@ -1,6 +1,6 @@
 # Skills 部署依赖清单
 
-脚本型 skill 需要在 **flowagent 部署服务器**上安装对应运行时依赖后，才能被内置的 `shell` 技能（`skill__shell`）真正执行。本文件是部署时的安装清单。
+脚本型 skill 需要在 **flowagent 部署服务器**上安装对应运行时依赖后，才能被内置的 `run_command` 工具真正执行。本文件是部署时的安装清单。
 
 ## 一键安装（首次部署）
 
@@ -25,13 +25,13 @@ skills/
 
 ## 执行链路说明
 
-脚本型 skill 在框架内是 **prompt 型**（指令注入 system prompt），真正的执行由内置 **shell 技能** 落地：
+skill 在框架内只是注入 system prompt 的指令（不区分类型、不注册为工具），真正的执行由内置 **run_command** 工具落地：
 
 ```
-模型读到 prompt 指令 → 调用 skill__shell 执行命令 → /bin/sh 运行 → stdout 回传
+模型读到 skill 指令 → 调用 run_command 执行命令 → sh -c（Windows: cmd /c）运行 → stdout 回传
 ```
 
-因此部署时需保证脚本路径 `skills/<skill>/scripts/` 相对 server 进程工作目录可正确解析（推荐用绝对路径，或固定 server 的启动工作目录为项目根）。
+skill 指令里 `skills/<skill>/scripts/` 形式的相对路径在注入前会被替换为项目根下的绝对路径，因此与 run_command 的工作目录（任务工作区）无关。
 
 ---
 

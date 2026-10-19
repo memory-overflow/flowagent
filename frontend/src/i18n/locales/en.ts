@@ -77,7 +77,7 @@ export const en = {
   welcome: {
     title: 'Workflow Agent',
     desc:
-      'A general-purpose workflow agent platform. Run single-agent conversations or DAG workflow orchestration, plug in external tools over MCP, and let AI finish complex tasks.',
+      'A general-purpose workflow agent platform. Automatically orchestrates tasks into DAG workflows and executes them, also supports single-agent conversations; plugs in external skills via MCP + Skills, letting AI finish complex tasks.',
     newChat: 'New chat',
     createFailed: 'Failed to create conversation: {msg}',
   },
@@ -168,7 +168,7 @@ export const en = {
     skillsTitle: 'Skills',
     skillsHintTitle: 'Skill management',
     skillsHintDesc:
-      'Create, edit and import skills in the panel on the right. Instruction skills are injected into the system prompt, executable ones are exposed to the model as tools; both can be enabled per conversation.',
+      'Create, edit and import skills in the panel on the right. Skill instructions are injected into the system prompt and bundled scripts are run by the model via run_command; skills can be enabled per conversation.',
     modelsTitle: 'Models',
     modelsHintTitle: 'Global model configuration',
     modelsHintDesc:
@@ -199,6 +199,10 @@ export const en = {
     openX: 'Open {name}',
     openLocal: 'Open local file',
     openFailed: 'Failed to open: {msg}',
+    reveal: 'Reveal',
+    revealX: 'Reveal {name} in folder',
+    revealing: 'Revealing…',
+    revealFailed: 'Failed to reveal: {msg}',
     collapseAll: 'Collapse',
     expandAll: 'Show all {n} files',
     loading: 'Loading…',

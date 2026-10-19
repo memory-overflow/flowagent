@@ -28,6 +28,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -35,6 +36,24 @@ import (
 
 // restartDelay 子进程退出后的重启间隔：太短会 crash 风暴刷屏，太长逃生体感差。
 const restartDelay = 2 * time.Second
+
+// binPath 返回带平台可执行后缀的子进程二进制路径。
+//
+// Windows 上 Go 编译出的可执行文件是 name.exe，而 filepath.Join(dir, name)
+// 拼出的是无扩展名路径；exec.Command 对含路径分隔符的参数不走 LookPath、
+// 不会自动补 .exe，直接 CreateProcess 会因文件不存在而 spawn 失败。
+// 因此 Windows 下必须补 .exe（install.bat/start.bat 编译产物正是 .exe）。
+func binPath(dir, name string) string {
+	return binPathFor(runtime.GOOS, dir, name)
+}
+
+// binPathFor 是 binPath 的可注入 GOOS 版本，便于测试在任意平台覆盖 Windows 分支。
+func binPathFor(goos, dir, name string) string {
+	if goos == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(dir, name)
+}
 
 // ============================================================
 // managed — 被托管的子进程
@@ -206,8 +225,8 @@ func main() {
 	flag.Parse()
 
 	procs := []*managed{
-		{name: "agent-server", bin: filepath.Join(*binDir, "agent-server"), args: []string{"-config", *configPath}},
-		{name: "agent-scheduler", bin: filepath.Join(*binDir, "agent-scheduler"), args: []string{"-config", *configPath}},
+		{name: "agent-server", bin: binPath(*binDir, "agent-server"), args: []string{"-config", *configPath}},
+		{name: "agent-scheduler", bin: binPath(*binDir, "agent-scheduler"), args: []string{"-config", *configPath}},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

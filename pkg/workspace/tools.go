@@ -20,17 +20,21 @@ package workspace
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/memory-overflow/flowagent/model"
 	"github.com/memory-overflow/flowagent/pkg/skill"
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 // DefaultTimeout 内置工具单次调用的默认超时。
@@ -275,7 +279,7 @@ func readFileTool() *ToolDef {
 			if strings.TrimSpace(path) == "" {
 				return "", fmt.Errorf("read_file 缺少 path 参数")
 			}
-			abs, err := resolveIn(wc, path)
+			abs, err := resolveReadable(wc, path)
 			if err != nil {
 				return "", err
 			}
@@ -318,12 +322,18 @@ func listDirTool() *ToolDef {
 			if strings.TrimSpace(path) == "" {
 				path = "."
 			}
-			abs, err := resolveIn(wc, path)
+			abs, err := resolveReadable(wc, path)
 			if err != nil {
 				return "", err
 			}
 			entries, err := os.ReadDir(abs)
 			if err != nil {
+				if os.IsNotExist(err) {
+					// 工作区目录可能尚未创建（纯对话、从没上传过文件/产出过产物）。
+					// 返回空列表而不是报错 —— 报错会把模型推向「用 find / 自己找」，
+					// 全盘搜索又慢又容易命中 /tmp 里的同名残留。
+					return fmt.Sprintf("目录 %s 为空（工作区尚未创建任何文件）", path), nil
+				}
 				return "", fmt.Errorf("列出目录失败: %w", err)
 			}
 
@@ -405,7 +415,7 @@ func fileExistsTool() *ToolDef {
 			if strings.TrimSpace(path) == "" {
 				return "", fmt.Errorf("file_exists 缺少 path 参数")
 			}
-			abs, err := resolveIn(wc, path)
+			abs, err := resolveReadable(wc, path)
 			if err != nil {
 				return "", err
 			}
@@ -557,26 +567,72 @@ func resolveCommandTimeout(args map[string]interface{}) time.Duration {
 	return timeout
 }
 
+// shellCommand 返回当前平台用于执行「一段 shell 命令」的解释器与 -c 等价标志。
+//
+// Windows 用 cmd /c（无 sh）；linux/darwin 等用 sh -c。模型生成的命令文本
+// 必须与所选 shell 匹配 —— 平台信息通过 ShellHint 注入 system prompt（见下）。
+func shellCommand() (name, flag string) {
+	if runtime.GOOS == "windows" {
+		return "cmd", "/c"
+	}
+	return "sh", "-c"
+}
+
+// ShellHint 返回注入 system prompt 的「当前运行环境」提示，让模型生成对应
+// 平台的命令（cmd 与 sh 的语法差异很大：dir/ls、type/cat、copy/cp、del/rm）。
+// 由 actuator 层在执行期与规划期分别注入。
+func ShellHint() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "当前运行环境是 Windows，请在 run_command 里使用 Windows cmd 兼容的命令（例如 dir、type、copy、del、mkdir，而不是 ls、cat、cp、rm、chmod），路径用反斜杠 \\。Python 命令请用 python（不要用 python3，Windows 上这个名字不可靠）；带空格的路径参数用双引号包裹。"
+	case "darwin":
+		return "当前运行环境是 macOS，请使用 Unix shell 兼容的命令（bash/zsh，例如 ls、cat、cp、rm）。"
+	default:
+		return "当前运行环境是 Linux，请使用 Unix shell 兼容的命令（bash/sh，例如 ls、cat、cp、rm）。"
+	}
+}
+
 // venvActivateFor 生成在 shell 命令前注入的 venv 激活片段。
 //
-// projectRoot 为项目根绝对路径，据此定位 <projectRoot>/.venv/bin/activate。
-// 用 shell 条件判断：venv 存在才 source，不存在则静默跳过（&& 短路）。
+// projectRoot 为项目根绝对路径，据此定位 venv 的 activate 脚本：
+//   - unix:    <projectRoot>/.venv/bin/activate，用 [ -f ] && source 激活；
+//   - windows: <projectRoot>/.venv/Scripts/activate.bat，用 if exist call 激活。
+//
 // 返回空串表示 projectRoot 为空（不激活）。
-func venvActivateFor(projectRoot string) string {
+// venvActivateFor 按 GOOS 返回激活前缀（平台实现见 venvActivateForWindows / venvActivateForUnix）。
+// venvBinFor 返回项目 venv 的可执行目录绝对路径（unix: .venv/bin，windows: .venv/Scripts）。
+// 目录不存在返回空串。调用方应把它注入子进程 PATH（并设 VIRTUAL_ENV），使
+// python / pip 直接命中 venv —— 相比在命令前拼接 shell 激活脚本，PATH 注入
+// 跨平台行为完全一致，且避开了 cmd /c 的引号/换行解析坑（往 cmd /c 传
+// 「激活前缀 + 用户命令」的复杂引号串会被 cmd 破坏，实测报
+// 「The filename, directory name, or volume label syntax is incorrect」）。
+func venvBinFor(projectRoot string) string {
+	return venvBinDirFor(runtime.GOOS, projectRoot)
+}
+
+// venvBinDirFor 是 venvBinFor 的可注入 GOOS 版本，便于在任意平台测试两个分支。
+func venvBinDirFor(goos, projectRoot string) string {
 	if strings.TrimSpace(projectRoot) == "" {
 		return ""
 	}
-	activate := filepath.Join(projectRoot, ".venv", "bin", "activate")
-	return "[ -f \"" + activate + "\" ] && . \"" + activate + "\"\n"
+	dir := filepath.Join(projectRoot, ".venv", "bin")
+	if goos == "windows" {
+		dir = filepath.Join(projectRoot, ".venv", "Scripts")
+	}
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		return ""
+	}
+	return dir
 }
 
 func runCommandTool() *ToolDef {
+	shellName, shellFlag := shellCommand()
 	return &ToolDef{
 		Name: "run_command",
-		Description: fmt.Sprintf("在工作区目录内执行一条 shell 命令（sh -c），返回 stdout。适合编译、运行脚本、git 等。危险删除命令会被拦截。"+
+		Description: fmt.Sprintf("在工作区目录内执行一条 shell 命令（%s %s），返回 stdout。适合编译、运行脚本、git 等。危险删除命令会被拦截。"+
 			"可选 timeout_seconds 指定超时（默认 %d 秒，上限 %d 秒）：预计耗时较长的命令"+
 			"（全盘搜索、全量编译、大批量文件处理）请主动放宽，否则会被默认超时打断。",
-			int(DefaultTimeout.Seconds()), int(maxCommandTimeout.Seconds())),
+			shellName, shellFlag, int(DefaultTimeout.Seconds()), int(maxCommandTimeout.Seconds())),
 		InputSchema: objectSchema(map[string]interface{}{
 			"cmd": strProp("要执行的 shell 命令，工作目录为当前任务的工作区"),
 			"timeout_seconds": map[string]interface{}{
@@ -601,11 +657,6 @@ func runCommandTool() *ToolDef {
 			if reason := skill.DetectDangerousCommand(cmd); reason != "" {
 				return "", fmt.Errorf("命令被安全策略拦截: %s", reason)
 			}
-			// 激活项目级 venv：run_command 的 cwd 是任务工作区，需用项目根
-			// 绝对路径定位 .venv；激活后 python/python3/pip 指向项目 venv。
-			if prefix := venvActivateFor(wc.ProjectRoot); prefix != "" {
-				cmd = prefix + cmd
-			}
 			if err := ensureDir(wc.WorkspaceDir); err != nil {
 				return "", fmt.Errorf("创建工作区目录失败: %w", err)
 			}
@@ -614,13 +665,27 @@ func runCommandTool() *ToolDef {
 			execCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
-			// 不用 exec.CommandContext：它只 kill 直接子进程 sh，而 sh fork 出的
+			// 不用 exec.CommandContext：它只 kill 直接子进程，而 shell fork 出的
 			// 孙进程（管道里的 find/head、后台任务）会活下来并继续持有 stdout
 			// pipe 写端，导致下面的 Wait 一直等不到 EOF、超时形同虚设
 			// （实测 ctx=2s 的 `sh -c "sleep 15 & wait"` 要 15s 才返回）。
 			// 改为自己起进程组 + select 等超时 + kill 整组。
-			ec := exec.Command("sh", "-c", cmd)
+			//
+			// 构造走 buildShellCmd：Windows 上必须用 SysProcAttr.CmdLine 直传
+			// 原始命令行（cmd.exe 不按 CRT argv 规则解析，EscapeArg 的 \"
+			// 转义会破坏命令内引号配对，详见 process_windows.go）。
+			ec := buildShellCmd(cmd)
 			ec.Dir = wc.WorkspaceDir
+			// 项目 venv 注入：把 .venv 的可执行目录提到子进程 PATH 最前（并设
+			// VIRTUAL_ENV），python / pip 即指向项目 venv。不在命令前拼接激活
+			// 脚本 —— Go exec 往 cmd /c 传「激活前缀 + 用户命令」的复杂引号串
+			// 会被 cmd 的引号规则破坏（实测报 filename/directory syntax
+			// incorrect），PATH 注入在 unix/windows 行为完全一致且无此坑。
+			if venvBin := venvBinFor(wc.ProjectRoot); venvBin != "" {
+				ec.Env = append(os.Environ(),
+					"PATH="+venvBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+					"VIRTUAL_ENV="+filepath.Dir(venvBin))
+			}
 			stdout := newLimitedBuffer(maxCommandOutputBytes)
 			stderr := newLimitedBuffer(maxCommandOutputBytes)
 			ec.Stdout = stdout
@@ -655,14 +720,30 @@ func runCommandTool() *ToolDef {
 			}
 
 			if runErr != nil {
-				detail := commandOutputDetail(stdout, stderr)
-				if detail != "" {
-					return "", fmt.Errorf("命令执行失败: %v (输出: %s)", runErr, truncateRunes(detail, 2000))
+				// 命令以非零退出码结束。这不是「工具故障」——findstr 无匹配
+				// 返回 1、ping 失败、脚本主动 exit N 都是「正常但非零」的场景，
+				// 若当作 error 回报，会被上层记成 FailTurn 并累加连续失败熔断，
+				// 把这类正常分支误判成死循环。这里把退出码 + stdout + stderr
+				// 一起作为结果返回，交给下游自己判断退出码。
+				code := exitCode(runErr)
+				var b strings.Builder
+				fmt.Fprintf(&b, "(命令退出码 %d)", code)
+				if so := strings.TrimSpace(decodeOutput(stdout)); so != "" {
+					fmt.Fprintf(&b, "\n\n标准输出:\n%s", so)
+					if stdout.truncated {
+						b.WriteString("\n…(stdout 输出过大，已截断)…")
+					}
 				}
-				return "", fmt.Errorf("命令执行失败: %v", runErr)
+				if se := strings.TrimSpace(decodeOutput(stderr)); se != "" {
+					fmt.Fprintf(&b, "\n\n标准错误:\n%s", se)
+					if stderr.truncated {
+						b.WriteString("\n…(stderr 输出过大，已截断)…")
+					}
+				}
+				return b.String(), nil
 			}
 
-			out := strings.TrimSpace(stdout.String())
+			out := strings.TrimSpace(decodeOutput(stdout))
 			if stdout.truncated {
 				out += "\n…(stdout 输出过大，已截断)…"
 			}
@@ -677,14 +758,51 @@ func runCommandTool() *ToolDef {
 // commandOutputDetail 取命令已产出的输出用于报错：优先 stderr，回退 stdout。
 // 超时场景尤其需要它 —— 模型能据此判断命令是「扫到一半」还是「一步没动」。
 func commandOutputDetail(stdout, stderr *limitedBuffer) string {
-	detail := strings.TrimSpace(stderr.String())
+	detail := strings.TrimSpace(decodeOutput(stderr))
 	if detail == "" {
-		detail = strings.TrimSpace(stdout.String())
+		detail = strings.TrimSpace(decodeOutput(stdout))
 	}
 	if detail != "" && (stderr.truncated || stdout.truncated) {
 		detail += "\n…(输出过大，已截断)…"
 	}
 	return detail
+}
+
+// exitCode 从 exec 的 Wait 错误里提取命令退出码；非 *exec.ExitError 返回 -1。
+func exitCode(err error) int {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return -1
+}
+
+// decodeOutput 把命令输出字节转成 UTF-8 字符串。
+//
+// Windows 上 cmd /c 的 stdout/stderr 默认按系统 ANSI 代码页（中文系统是 GBK）
+// 输出字节；直接 string(bytes) 会按 UTF-8 解释，中文就变成乱码（如
+// 「驱动器 C 中的卷没有标签」→ 不可读的 mojibake）。而且 chcp 65001 对
+// 重定向到管道的输出往往不生效（chcp 只改控制台，不改 pipe 编码），所以
+// 只能在读取侧解码。
+//
+// 策略：字节若是合法 UTF-8 直接放行（兼容程序自行输出 UTF-8 的情况）；
+// 否则按 GBK 解码。非 Windows 平台原样返回。
+func decodeOutput(b *limitedBuffer) string {
+	if b == nil {
+		return ""
+	}
+	return decodeOutputBytes(runtime.GOOS, b.buf.Bytes())
+}
+
+// decodeOutputBytes 是 decodeOutput 的可注入 GOOS 版本，便于测试覆盖 Windows 分支。
+func decodeOutputBytes(goos string, raw []byte) string {
+	if goos != "windows" || utf8.Valid(raw) {
+		return string(raw)
+	}
+	if dec, err := simplifiedchinese.GBK.NewDecoder().Bytes(raw); err == nil {
+		return string(dec)
+	}
+	return string(raw)
 }
 
 // ============================================================
@@ -860,7 +978,7 @@ func AnalyzeImageTool() *ToolDef {
 			if strings.TrimSpace(path) == "" {
 				return "", fmt.Errorf("analyze_image 缺少 path 参数")
 			}
-			abs, err := resolveIn(wc, path)
+			abs, err := resolveReadable(wc, path)
 			if err != nil {
 				return "", err
 			}
@@ -904,11 +1022,41 @@ func imageMimeType(ext string) string {
 // 内部辅助
 // ============================================================
 
-// resolveIn 把相对路径解析到当前任务工作区内（沙箱校验）。
+// resolveIn 把相对路径解析到当前任务工作区内（沙箱校验）。写操作用这个，
+// 严格限制在工作区内。
 func resolveIn(wc *Context, relPath string) (string, error) {
+	return resolveInScope(wc, relPath, false)
+}
+
+// resolveReadable 同 resolveIn，但额外放行项目根内的绝对路径。
+//
+// 只读浏览场景需要它：模型经常要查看项目自身的目录/文件（如浏览
+// skills/ 下的脚本），传的是项目根内的绝对路径，按老沙箱一律拒绝会让
+// 模型寸步难行；而 run_command 本就没有路径沙箱（cwd 虽在工作区，命令
+// 却可以触达任意路径），对只读工具单独收紧并无安全收益。
+// 写操作（write_file / create_dir）不走这里，仍严格限制在工作区内。
+func resolveReadable(wc *Context, relPath string) (string, error) {
+	return resolveInScope(wc, relPath, true)
+}
+
+func resolveInScope(wc *Context, relPath string, allowProjectRoot bool) (string, error) {
 	if wc == nil || strings.TrimSpace(wc.WorkspaceDir) == "" {
 		return "", fmt.Errorf("当前任务没有工作区目录，无法执行文件操作")
 	}
+
+	rel := strings.TrimSpace(relPath)
+	if allowProjectRoot && wc.ProjectRoot != "" &&
+		(filepath.IsAbs(rel) || strings.HasPrefix(rel, "~") || isDrivePath(rel)) {
+		// 绝对路径：仅当落在项目根内时放行（返回项目根内的绝对路径）。
+		if rootAbs, rerr := filepath.Abs(wc.ProjectRoot); rerr == nil {
+			clean := filepath.Clean(rel)
+			if withinDir(rootAbs, clean) {
+				return clean, nil
+			}
+		}
+		// 项目根之外的绝对路径继续走原沙箱 → 被拒绝。
+	}
+
 	m := &Manager{root: wc.WorkspaceDir}
 	return m.Resolve(wc.WorkspaceDir, relPath)
 }

@@ -1,11 +1,7 @@
 {
   "key": "shell",
   "name": "shell",
-  "description": "在服务器上执行 shell 命令。把要执行的命令作为 input 传入，后端用 /bin/sh 逐行执行并回传 stdout。用于落地其它技能依赖的本地 CLI/脚本（如 pdfkit.py、浏览器自动化、Excel 处理脚本、python 脚本等）。",
-  "type": 2,
-  "command": "/bin/sh",
-  "args": [],
-  "env": {},
-  "content": "## 执行基座：Shell 命令执行\n\n这是一个可执行型技能。当其它技能（如 PDF 处理、浏览器自动化、Excel 表格、检索抓取等）需要真正运行本地命令/脚本时，用本技能落地执行。\n\n### 调用方式\n调用工具 `skill__shell`，把完整的 shell 命令作为 `input` 参数传入。后端会用 `/bin/sh` 逐行执行，并把 stdout 回传给你。\n\n### 使用规则\n1. 把要执行的命令（可多行）整体放进 input，例如：\n   ```\n   python3 /path/to/pdfkit.py extract_text --input a.pdf\n   ```\n2. 命令在服务进程的工作目录下执行，输出（stdout）会回传，据此判断下一步。\n3. 优先用绝对路径调用脚本/解释器；不确定环境时先用 `which python3`、`ls` 等探明。\n4. 涉及删除、覆盖、移动等破坏性操作前，先 `ls`/`cat` 确认目标，再谨慎执行。\n5. 单次执行超过 60 秒会被超时中断；长任务请拆成多步小命令分次执行。\n6. 依赖某个脚本时，先确认脚本存在（`ls`）再调用，避免因路径错误反复失败。",
-  "description_en": "Execute shell commands on the server. Pass the command as input; the backend runs it line by line with /bin/sh and returns stdout. Grounds local CLI/scripts needed by other skills (pdfkit.py, browser automation, Excel scripts, python, etc.)."
+  "description": "命令执行规范：指导如何用内置 run_command 工具运行其它技能依赖的本地脚本/CLI（如 pdfkit.py、Office 处理脚本、浏览器自动化、python 脚本等），含跨平台语法、超时与安全约束。",
+  "content": "## 命令执行规范\n\n当其它技能（PDF 处理、Word/PPT/Excel、浏览器自动化等）需要真正运行本地脚本或命令时，统一用内置工具 `run_command` 执行，把完整命令作为 `cmd` 参数传入，stdout 会回传给你。\n\n### 使用规则\n1. 命令在当前任务的工作区目录下执行；调用技能脚本时直接使用技能指令里给出的绝对路径，不要自己拼接或改写路径。\n2. 技能脚本及其运行环境（Python 依赖、项目虚拟环境）已预先装好，且已注入 PATH：直接按技能指令调用即可，不要用 `which`、`ls`、`pip list` 等命令去探测环境或确认脚本是否存在。\n3. 按系统提示里的「当前运行环境」选择命令语法：Windows 上是 cmd（用 `python`、`dir`、`type`、`copy`，路径用反斜杠），macOS/Linux 上是 sh。带空格的路径参数用双引号包裹。\n4. 默认超时 60 秒；预计耗时较长的命令（批量转换、OCR、全量处理）请传 `timeout_seconds` 主动放宽，上限 900 秒。\n5. 非零退出码不算工具失败：返回结果会带「命令退出码 N」及 stdout/stderr，据此判断下一步，不要原样重试同一条失败命令。\n6. 涉及删除、覆盖、移动等破坏性操作前先确认目标；危险删除命令（如 rm -rf）会被安全策略拦截，被拦截时停下来向用户确认，不要换写法绕过。",
+  "description_en": "Command execution guide: how to run local scripts/CLIs needed by other skills (pdfkit.py, Office scripts, browser automation, python, etc.) via the built-in run_command tool, including cross-platform syntax, timeouts and safety rules."
 }

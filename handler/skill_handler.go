@@ -1,13 +1,13 @@
 package handler
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -48,11 +48,7 @@ type SkillItem struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Type        int    `json:"type"`
 	Content     string `json:"content,omitempty"`
-	Command     string `json:"command,omitempty"`
-	Args        string `json:"args,omitempty"`
-	Env         string `json:"env,omitempty"`
 	CreateTs    int64  `json:"create_ts"`
 	UpdateTs    int64  `json:"update_ts"`
 	// 展示与数据分离：name/description 永远是中文原文（编辑回填、英文界面回落值），
@@ -70,24 +66,16 @@ type SkillDetailRequest struct {
 }
 
 type CreateSkillRequest struct {
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Type        model.SkillType   `json:"type"`
-	Content     string            `json:"content"`
-	Command     string            `json:"command,omitempty"`
-	Args        []string          `json:"args,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Content     string `json:"content"`
 }
 
 type UpdateSkillRequest struct {
-	SkillID     string            `json:"skill_id"`
-	Name        string            `json:"name,omitempty"`
-	Description string            `json:"description,omitempty"`
-	Type        model.SkillType   `json:"type,omitempty"`
-	Content     string            `json:"content,omitempty"`
-	Command     string            `json:"command,omitempty"`
-	Args        []string          `json:"args,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
+	SkillID     string `json:"skill_id"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Content     string `json:"content,omitempty"`
 }
 
 type DeleteSkillRequest struct {
@@ -141,28 +129,15 @@ func CreateSkill(ctx *gin.Context, req interface{}) (interface{}, error) {
 	if r.Name == "" {
 		return nil, &APIError{Code: http.StatusBadRequest, Msg: "name 不能为空"}
 	}
-	if r.Type == 0 {
-		r.Type = model.SkillTypePrompt
-	}
 
 	now := time.Now()
 	skill := &model.Skill{
 		ID:          uuid.New().String(),
 		Name:        r.Name,
 		Description: r.Description,
-		Type:        r.Type,
 		Content:     r.Content,
-		Command:     r.Command,
 		CreatedAt:   now,
 		UpdatedAt:   now,
-	}
-	if len(r.Args) > 0 {
-		b, _ := json.Marshal(r.Args)
-		skill.Args = string(b)
-	}
-	if len(r.Env) > 0 {
-		b, _ := json.Marshal(r.Env)
-		skill.Env = string(b)
 	}
 
 	skillDAO := &dao.SkillDAO{}
@@ -185,22 +160,8 @@ func UpdateSkill(ctx *gin.Context, req interface{}) (interface{}, error) {
 	if r.Description != "" {
 		updates["description"] = r.Description
 	}
-	if r.Type != 0 {
-		updates["type"] = r.Type
-	}
 	if r.Content != "" {
 		updates["content"] = r.Content
-	}
-	if r.Command != "" {
-		updates["command"] = r.Command
-	}
-	if r.Args != nil {
-		b, _ := json.Marshal(r.Args)
-		updates["args"] = string(b)
-	}
-	if r.Env != nil {
-		b, _ := json.Marshal(r.Env)
-		updates["env"] = string(b)
 	}
 	updates["updated_time"] = time.Now()
 
@@ -240,11 +201,7 @@ func buildSkillItem(s *model.Skill) *SkillItem {
 		ID:          s.ID,
 		Name:        s.Name,
 		Description: s.Description,
-		Type:        int(s.Type),
 		Content:     s.Content,
-		Command:     s.Command,
-		Args:        s.Args,
-		Env:         s.Env,
 		CreateTs:    s.CreatedAt.UnixMilli(),
 		UpdateTs:    s.UpdatedAt.UnixMilli(),
 	}
@@ -270,13 +227,9 @@ type BuiltinSkillItem struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	// NameDisplay/DescDisplay 按请求语言折算的展示值（en 有翻译用翻译，否则回落中文）
-	NameDisplay string            `json:"name_display"`
-	DescDisplay string            `json:"description_display"`
-	Type        int               `json:"type"`
-	Content     string            `json:"content,omitempty"`
-	Command     string            `json:"command,omitempty"`
-	Args        []string          `json:"args,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
+	NameDisplay string `json:"name_display"`
+	DescDisplay string `json:"description_display"`
+	Content     string `json:"content,omitempty"`
 	// AlreadyImported 数据库里已有同名记录（按 name 判重）
 	AlreadyImported bool `json:"already_imported"`
 }
@@ -312,11 +265,7 @@ func ListBuiltinSkill(ctx *gin.Context, req interface{}) (interface{}, error) {
 			Description:     m.Description,
 			NameDisplay:     PickDisplay(lang, m.Name, m.NameEn),
 			DescDisplay:     PickDisplay(lang, m.Description, m.DescriptionEn),
-			Type:            int(m.Type),
 			Content:         e.Content,
-			Command:         e.Command,
-			Args:            e.Args,
-			Env:             e.Env,
 			AlreadyImported: nameSet[m.Name],
 		})
 	}
@@ -384,13 +333,6 @@ func ImportBuiltinSkill(ctx *gin.Context, req interface{}) (interface{}, error) 
 		}
 		expanded := m.ExpandEnv()
 
-		argsJSON, _ := json.Marshal(expanded.Args)
-		envJSON, _ := json.Marshal(expanded.Env)
-		skillType := m.Type
-		if skillType == 0 {
-			skillType = model.SkillTypePrompt
-		}
-
 		if old, ok := byName[m.Name]; ok {
 			if !r.Overwrite {
 				resp.Skipped = append(resp.Skipped, m.Name)
@@ -400,11 +342,7 @@ func ImportBuiltinSkill(ctx *gin.Context, req interface{}) (interface{}, error) 
 				"description":    m.Description,
 				"description_en": m.DescriptionEn,
 				"name_en":        m.NameEn,
-				"type":           skillType,
 				"content":        expanded.Content,
-				"command":        expanded.Command,
-				"args":           string(argsJSON),
-				"env":            string(envJSON),
 				"updated_time":   time.Now(),
 			}
 			if err := skillDAO.UpdateSkill(ctx, old.ID, updates); err != nil {
@@ -421,11 +359,7 @@ func ImportBuiltinSkill(ctx *gin.Context, req interface{}) (interface{}, error) 
 			Description:   m.Description,
 			NameEn:        m.NameEn,
 			DescriptionEn: m.DescriptionEn,
-			Type:          skillType,
 			Content:       expanded.Content,
-			Command:       expanded.Command,
-			Args:          string(argsJSON),
-			Env:           string(envJSON),
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
@@ -540,23 +474,13 @@ func ImportSkillZip(c *gin.Context) {
 		result.TotalFiles += filesInZip
 
 		now := time.Now()
-		argsJSON, _ := json.Marshal(item.Args)
-		envJSON, _ := json.Marshal(item.Env)
-		skillType := item.Type
-		if skillType == 0 {
-			skillType = model.SkillTypePrompt
-		}
 
 		action := "created"
 		var saved *model.Skill
 		if old != nil {
 			updates := map[string]interface{}{
 				"description":  item.Description,
-				"type":         skillType,
 				"content":      item.Content,
-				"command":      item.Command,
-				"args":         string(argsJSON),
-				"env":          string(envJSON),
 				"updated_time": now,
 			}
 			if err := skillDAO.UpdateSkill(c.Request.Context(), old.ID, updates); err != nil {
@@ -570,11 +494,7 @@ func ImportSkillZip(c *gin.Context) {
 				ID:          uuid.New().String(),
 				Name:        item.Name,
 				Description: item.Description,
-				Type:        skillType,
 				Content:     item.Content,
-				Command:     item.Command,
-				Args:        string(argsJSON),
-				Env:         string(envJSON),
 				CreatedAt:   now,
 				UpdatedAt:   now,
 			}
@@ -599,4 +519,110 @@ func ImportSkillZip(c *gin.Context) {
 		reqID, result.Total, result.TotalFiles)
 
 	c.JSON(http.StatusOK, CommonResponse{Code: 0, Msg: "ok", ReqID: reqID, Data: result})
+}
+
+// ImportSkillMD 接收单个 SKILL.md 文件（multipart），解析为 skill。
+//
+// 与 ImportSkillZip 的「社区 SKILL.md 单包」等价，省去打包 zip：直接上传一个
+// .md（YAML frontmatter: name/description + 正文）即可导入。
+//
+// 表单字段：file（.md 文件）、overwrite（"true"/"1" 时同名覆盖）。
+func ImportSkillMD(c *gin.Context) {
+	reqID := ensureReqID(c)
+
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "缺少 file 字段: "+err.Error(), reqID)
+		return
+	}
+	overwrite := c.PostForm("overwrite") == "true" || c.PostForm("overwrite") == "1"
+
+	src, err := fileHeader.Open()
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "读取上传文件失败: "+err.Error(), reqID)
+		return
+	}
+	defer src.Close()
+	data, err := io.ReadAll(io.LimitReader(src, 1<<20)) // 单文件 1MB 上限
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "读取文件内容失败: "+err.Error(), reqID)
+		return
+	}
+
+	name, desc, body, key, err := pkgskill.ParseSkillMarkdown(string(data))
+	if err != nil {
+		writeError(c, http.StatusBadRequest, err.Error(), reqID)
+		return
+	}
+
+	// 落地 SKILL.md 到 skills/user/<key>/（与 zip 导入同目录）
+	dir := filepath.Join(skillsRootDir(), key)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		writeError(c, http.StatusInternalServerError, "创建 skill 目录失败: "+err.Error(), reqID)
+		return
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), data, 0o644); err != nil {
+		writeError(c, http.StatusInternalServerError, "写入 SKILL.md 失败: "+err.Error(), reqID)
+		return
+	}
+	// ${CODEBUDDY_SKILL_DIR} 替换（与 zip 导入一致，见 mergeSkillPack）
+	content := strings.ReplaceAll(body, "${CODEBUDDY_SKILL_DIR}", pkgskill.UserSkillsRelDir+"/"+key)
+
+	// 写 skill 表
+	skillDAO := &dao.SkillDAO{}
+	existing, err := skillDAO.ListSkills(c.Request.Context(), "")
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "查询已有 Skill 失败: "+err.Error(), reqID)
+		return
+	}
+	var old *model.Skill
+	for _, s := range existing {
+		if s.Name == name {
+			old = s
+			break
+		}
+	}
+
+	now := time.Now()
+	action := "created"
+	var saved *model.Skill
+	if old != nil {
+		if !overwrite {
+			c.JSON(http.StatusOK, CommonResponse{Code: 0, Msg: "ok", ReqID: reqID, Data: &SkillZipImportResult{
+				Skills: []*SkillZipImportItem{{Skill: buildSkillItem(old), Key: key, Action: "skipped"}},
+				Total:  1,
+			}})
+			return
+		}
+		updates := map[string]interface{}{
+			"description":  desc,
+			"content":      content,
+			"updated_time": now,
+		}
+		if err := skillDAO.UpdateSkill(c.Request.Context(), old.ID, updates); err != nil {
+			writeError(c, http.StatusInternalServerError, "更新 Skill 失败: "+err.Error(), reqID)
+			return
+		}
+		saved, _ = skillDAO.GetSkillByID(c.Request.Context(), old.ID)
+		action = "updated"
+	} else {
+		saved = &model.Skill{
+			ID:          uuid.New().String(),
+			Name:        name,
+			Description: desc,
+			Content:     content,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+		if err := skillDAO.CreateSkill(c.Request.Context(), saved); err != nil {
+			writeError(c, http.StatusInternalServerError, "创建 Skill 失败: "+err.Error(), reqID)
+			return
+		}
+	}
+
+	log.Printf("[skill-handler][%s] md imported: name=%s key=%s action=%s", reqID, name, key, action)
+	c.JSON(http.StatusOK, CommonResponse{Code: 0, Msg: "ok", ReqID: reqID, Data: &SkillZipImportResult{
+		Skills: []*SkillZipImportItem{{Skill: buildSkillItem(saved), Key: key, Action: action, ScriptsDir: dir}},
+		Total:  1,
+	}})
 }

@@ -6,10 +6,12 @@
 //
 // 两者共用本组件，保证「暴露给 LLM 的名字」与「反查时用的名字」始终一致。
 //
-// 工具来源有三类，统一抽象成 ToolEntry：
+// 工具来源有两类，统一抽象成 ToolEntry：
 //   - 内置 native 工具：框架内核能力（文件/命令/时间），默认对全部对话可用，对用户隐藏
 //   - MCP 工具：跨 server 命名空间 <server>__<tool>，执行时走 MCP 协议
-//   - Skill 工具：command 型 skill，命名空间 skill__<name>，执行时本地 shell 子进程
+//
+// Skill 不是工具来源：它只是注入 system prompt 的指令（对齐行业 Agent
+// Skills 模式），随包脚本由模型通过内置 run_command 执行。
 //
 // 联网抓取（web_fetch）归入 MCP 一类：框架内置 mcp-server-fetch，仅在
 // deep_search 子任务里注入（配合 web_search 做「定位 → 精读」两段式检索），
@@ -25,7 +27,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/memory-overflow/flowagent/dao"
 	"github.com/memory-overflow/flowagent/model"
@@ -55,11 +59,10 @@ type toolKind int
 
 const (
 	toolKindMCP     toolKind = 1 // MCP 协议工具
-	toolKindSkill   toolKind = 2 // command 型 skill 本地执行
 	toolKindBuiltin toolKind = 3 // 框架内置 native 工具（文件/命令/时间/抓取）
 )
 
-// ToolEntry 一个可被 LLM 调用的工具条目。MCP 与 Skill 二选一，
+// ToolEntry 一个可被 LLM 调用的工具条目。MCP 与内置工具二选一，
 // 通过 Kind 区分，执行时按对应方式分发。
 type ToolEntry struct {
 	// ExposedName 暴露给 LLM 的名字（已加命名空间前缀并清洗）
@@ -72,8 +75,6 @@ type ToolEntry struct {
 	Kind toolKind
 	// MCP 当 Kind == toolKindMCP 时非空
 	MCP *mcppkg.RegisteredTool
-	// Skill 当 Kind == toolKindSkill 时非空
-	Skill *skillpkg.Config
 	// Builtin 当 Kind == toolKindBuiltin 时非空
 	Builtin *workspacepkg.ToolDef
 }
@@ -210,7 +211,7 @@ func (s *ToolSet) Len() int {
 // ============================================================
 
 // toolProvider 负责从 DB + MCP server 加载对话可用的工具，
-// 同时从 DB 加载对话启用的 Skill（prompt 型用于注入指令，command 型暴露为工具）。
+// 同时从 DB 加载对话启用的 Skill（用于注入 system prompt 指令）。
 type toolProvider struct {
 	convMCPDAO   *dao.ConversationMCPDAO
 	mcpServerDAO *dao.MCPServerDAO
@@ -277,7 +278,7 @@ func newToolProvider(
 	return p
 }
 
-// Load 加载指定对话可用的工具集（内置 native 工具 + 对话绑定 MCP + command 型 skill）。
+// Load 加载指定对话可用的工具集（内置 native 工具 + 对话绑定 MCP）。
 //
 // 内置 native 工具（文件/命令/时间）默认对所有对话可用，不依赖任何绑定，
 // 也不进 skill/mcp 配置列表 —— 它们属于框架内核能力，对用户隐藏。
@@ -342,26 +343,6 @@ func (p *toolProvider) Load(ctx context.Context, chatID string) (*ToolSet, error
 		return nil, err
 	}
 	entries = append(entries, mcpEntries...)
-
-	// 3. command 型 skill 工具
-	skillConfigs, err := p.LoadSkills(ctx, chatID)
-	if err != nil {
-		// skill 加载失败不阻断 MCP 工具 —— 记日志降级
-		log.Printf("[tool-provider] chat=%s load skills failed: %v", chatID, err)
-	} else {
-		for _, cfg := range skillConfigs {
-			if !cfg.IsCommand() {
-				continue
-			}
-			entries = append(entries, ToolEntry{
-				ExposedName: cfg.ToolName(),
-				Description: cfg.Description,
-				InputSchema: cfg.ToolSchema(),
-				Kind:        toolKindSkill,
-				Skill:       cfg,
-			})
-		}
-	}
 
 	return newToolSet(entries), nil
 }
@@ -479,7 +460,7 @@ func (p *toolProvider) loadMCPTools(ctx context.Context, chatID string) ([]ToolE
 	return entries, nil
 }
 
-// LoadSkills 加载对话启用（enabled）的 Skill 配置（含 prompt 型与 command 型）。
+// LoadSkills 加载对话启用（enabled）的 Skill 配置（供 system prompt 注入）。
 //
 // 返回 nil 表示无可用 skill；调用方据此决定是否注入 system prompt 片段。
 func (p *toolProvider) LoadSkills(ctx context.Context, chatID string) ([]*skillpkg.Config, error) {
@@ -519,9 +500,54 @@ func (p *toolProvider) LoadSkills(ctx context.Context, chatID string) ([]*skillp
 		if p.projectRoot != "" {
 			cfg.Content = skillpkg.AbsolutizePaths(cfg.Content, p.projectRoot)
 		}
+		// 社区 SKILL.md 惯用「相对 skill 落地目录」的路径（如 `scripts/calc_plan.py`），
+		// AbsolutizePaths 只认 skills/ 前缀，这类路径会原样进 prompt —— 模型解析
+		// 不了只能 `find /` 全盘搜，还会先命中 /tmp 里 zip 校验残留的同名文件，
+		// 拿错脚本位置。这里定位落地目录，注入根目录说明并绝对化。
+		if dir := locateSkillDir(p.projectRoot, cfg.Name); dir != "" {
+			cfg.Content = injectSkillDir(cfg.Content, dir)
+		}
 		configs = append(configs, cfg)
 	}
 	return configs, nil
+}
+
+// locateSkillDir 尝试定位 skill 的落地目录（绝对路径）。
+//
+// zip 导入的社区 skill 落在 skills/user/<name>/，内置导入落在 skills/<name>/；
+// DB 记录未存落地目录，用 name 作为 key 近似定位（zip 导入时二者一致）。
+// 都找不到返回空串（调用方跳过注入）。
+func locateSkillDir(projectRoot, name string) string {
+	if projectRoot == "" || strings.TrimSpace(name) == "" {
+		return ""
+	}
+	for _, rel := range []string{
+		filepath.Join("skills", "user", name),
+		filepath.Join("skills", name),
+	} {
+		dir := filepath.Join(projectRoot, rel)
+		if st, err := os.Stat(dir); err == nil && st.IsDir() {
+			return dir
+		}
+	}
+	return ""
+}
+
+// injectSkillDir 在 content 前注入「脚本根目录」说明行，并把 content 里
+// 反引号包裹的 skill 目录相对路径（`scripts/...`、`references/...`、
+// `assets/...`）替换成绝对路径。只动反引号内的路径引用，不误伤正文文本。
+func injectSkillDir(content, dir string) string {
+	if strings.TrimSpace(content) == "" || dir == "" {
+		return content
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "本技能文件根目录：%s\n（下文提到的 scripts/、references/、assets/ 等相对路径均相对此目录）\n\n", dir)
+	b.WriteString(content)
+	out := b.String()
+	for _, prefix := range []string{"scripts/", "references/", "assets/"} {
+		out = strings.ReplaceAll(out, "`"+prefix, "`"+dir+string(filepath.Separator)+prefix)
+	}
+	return out
 }
 
 // ============================================================

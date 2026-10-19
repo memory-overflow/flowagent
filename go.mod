@@ -11,6 +11,7 @@ require (
 	github.com/memory-overflow/light-task-scheduler v1.2.3
 	github.com/pkoukk/tiktoken-go v0.1.8
 	golang.org/x/net v0.25.0
+	golang.org/x/text v0.20.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.5.2
 	gorm.io/gorm v1.25.12
@@ -62,7 +63,6 @@ require (
 	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/sync v0.9.0 // indirect
 	golang.org/x/sys v0.20.0 // indirect
-	golang.org/x/text v0.20.0 // indirect
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
 	google.golang.org/protobuf v1.30.0 // indirect
 	modernc.org/libc v1.22.5 // indirect

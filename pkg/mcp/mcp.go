@@ -6,9 +6,15 @@
 //   - CallTool：调用某个 server 上的具体工具
 //
 // 设计说明：
-// MCP 连接是「用完即走」的短连接模式 —— 每次操作独立建连、握手、执行、关闭。
-// 相比维护长连接池，这样做的好处是无状态、不需要处理连接失效重连，
-// 代价是每次调用多一次握手开销。对当前调用频次（秒级）完全可接受。
+// 连接策略分两档（详见 pool.go 的包注释）：
+//   - CallTool 对 stdio server 走**池化复用**：同一 server 的连接在空闲 TTL 内
+//     保留，避免每次调用都新起子进程。这是必须的 —— playwright 的浏览器是
+//     server 的子进程，连接一关浏览器就没了，且跨调用的页面状态会全部丢失。
+//   - 其余情况（sse / streamable_http，以及 ListTools）仍是「用完即走」的
+//     短连接：远端常驻服务本地建连很轻，预热也不需要长期占住子进程。
+//
+// 历史上这里是全量短连接，代价是每次调用多一次握手；对有状态的 server
+// 则不只是开销问题，而是功能不成立。
 package mcp
 
 import (
@@ -16,6 +22,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -26,8 +33,19 @@ import (
 	"github.com/memory-overflow/flowagent/model"
 )
 
-// DefaultTimeout 单次 MCP 操作的默认超时
-const DefaultTimeout = 30 * time.Second
+// DefaultTimeout 单次 MCP 操作的默认超时（用户请求路径：拉取工具列表、调用工具）。
+//
+// 30s 对已预热的 server 足够；但若用户请求恰好赶上某个 server 尚未预热完
+// （首次下载包仍在进行），过短的预算会让这次请求直接失败。放宽到 60s，
+// 既给冷启动留出余量，又不至于让交互停滞太久。
+const DefaultTimeout = 60 * time.Second
+
+// PrewarmTimeout 启动期预热的单 server 超时。
+//
+// 明显宽于 DefaultTimeout：预热跑在后台 goroutine、用户并不等待，而
+// 首次下载（npx 拉包、Playwright 下内核等）在网络不佳时动辄超过一分钟。
+// 给足预算，让这类一次性开销在启动期付清，用户首个请求才不会撞上下载。
+const PrewarmTimeout = 180 * time.Second
 
 // clientName / clientVersion MCP 握手时上报的客户端标识
 const (
@@ -58,6 +76,10 @@ type ServerConfig struct {
 
 // ConfigFromModel 把 DB 里的 model.MCPServer 解析成连接配置。
 // Args / Env / Headers 在 DB 里是 JSON 字符串，这里统一解析。
+//
+// Command 过一遍 NormalizeCommand：内置 MCP（fetch / git）的清单里存的是
+// Unix 相对路径 .venv/bin/python，落库后原样保留，到 Windows 上必须在
+// 这里补上 .venv/bin → .venv\Scripts 的换算，否则调度器起子进程会失败。
 func ConfigFromModel(s *model.MCPServer) (*ServerConfig, error) {
 	if s == nil {
 		return nil, fmt.Errorf("mcp: nil server model")
@@ -69,7 +91,7 @@ func ConfigFromModel(s *model.MCPServer) (*ServerConfig, error) {
 		ServerID:   s.ID,
 		ServerName: s.Name,
 		Transport:  s.Transport,
-		Command:    s.Command,
+		Command:    NormalizeCommand(s.Command),
 		Args:       parseStringSlice(s.Args),
 		Env:        envMapToSlice(parseStringMap(s.Env)),
 		URL:        s.URL,
@@ -162,6 +184,10 @@ func ListTools(ctx context.Context, cfg *ServerConfig) ([]ToolInfo, error) {
 
 // CallTool 连接指定 server 并调用其上的某个工具。
 //
+// stdio server 复用池内连接（见 pool.go）：这样 server 进程内的状态
+// （playwright 的浏览器 / 页面）才能跨调用存活。连接失效时丢弃并重建
+// 重试一次 —— 仅在「请求确定未送达」的错误上重试，避免副作用执行两次。
+//
 // 返回 error 只代表协议层失败（连不上 / 握手失败 / 调用异常）。
 // 工具自身返回的业务错误通过 ToolResult.IsError 表达，此时 error 为 nil。
 func CallTool(
@@ -175,6 +201,44 @@ func CallTool(
 		return nil, fmt.Errorf("mcp: empty tool name")
 	}
 
+	if !poolable(cfg) {
+		return callToolOnce(ctx, cfg, toolName, args)
+	}
+
+	c, err := globalPool.acquire(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	res, callErr := c.call(ctx, toolName, args)
+	if callErr == nil {
+		return res, nil
+	}
+	if !isReusableConnErr(callErr) {
+		return nil, fmt.Errorf("mcp: call tool %s on %s: %w", toolName, cfg.ServerName, callErr)
+	}
+
+	// 连接已失效（server 自己挂了，或条目被空闲回收）：重建后再试一次。
+	globalPool.discard(c)
+	log.Printf("[mcp-pool] %s connection unusable, reconnecting: %v", cfg.ServerName, callErr)
+
+	c2, err := globalPool.acquire(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	res, err = c2.call(ctx, toolName, args)
+	if err != nil {
+		return nil, fmt.Errorf("mcp: call tool %s on %s: %w", toolName, cfg.ServerName, err)
+	}
+	return res, nil
+}
+
+// callToolOnce 短连接路径：建连 → 调用 → 关闭。
+// 用于 sse / streamable_http 这类远端常驻服务（见 package 注释）。
+func callToolOnce(
+	ctx context.Context, cfg *ServerConfig,
+	toolName string, args map[string]interface{},
+) (*ToolResult, error) {
 	cli, closeFn, err := connect(ctx, cfg)
 	if err != nil {
 		return nil, err

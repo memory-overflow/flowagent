@@ -83,7 +83,7 @@ export const zh = {
   welcome: {
     title: 'Workflow Agent',
     desc:
-      '通用工作流 Agent 平台。支持单 Agent 对话和 DAG 工作流编排，通过 MCP 协议接入外部工具，让 AI 完成复杂任务。',
+      '通用工作流 Agent 平台。自动编排任务为 DAG 工作流并执行，也支持单 Agent 对话；通过 MCP + Skills 接入外部技能，让 AI 完成复杂任务。',
     newChat: '新建对话',
     createFailed: '创建对话失败: {msg}',
   },
@@ -178,7 +178,7 @@ export const zh = {
     skillsTitle: 'Skill 技能',
     skillsHintTitle: 'Skill 管理',
     skillsHintDesc:
-      '在右侧面板创建、编辑、导入 Skill。指令型注入 system prompt，可执行型作为工具被模型调用；每个对话可单独启用。',
+      '在右侧面板创建、编辑、导入 Skill。Skill 的指令注入 system prompt，随包脚本由模型通过 run_command 执行；每个对话可单独启用。',
     modelsTitle: '模型配置',
     modelsHintTitle: '全局模型配置',
     modelsHintDesc:
@@ -210,6 +210,10 @@ export const zh = {
     openX: '打开 {name}',
     openLocal: '打开本地文件',
     openFailed: '打开失败: {msg}',
+    reveal: '定位',
+    revealX: '在文件夹中定位 {name}',
+    revealing: '定位中…',
+    revealFailed: '定位失败: {msg}',
     collapseAll: '收起',
     expandAll: '展开全部 {n} 个文件',
     loading: '加载中…',

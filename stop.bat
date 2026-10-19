@@ -9,10 +9,32 @@ REM     in other directories are left untouched.
 REM   - frontend: stopped by the window title opened by start.bat.
 REM
 REM Usage: stop.bat
+REM
+REM The console window always waits for a key press before closing, whether the
+REM stop succeeded or failed.
 REM ============================================================================
 setlocal
 cd /d "%~dp0"
 
+call :main %*
+set "RC=%errorlevel%"
+
+echo.
+if "%RC%"=="0" (
+    echo === Stop finished ===
+) else (
+    echo === STOP FAILED ^(exit code %RC%^) ===
+)
+
+echo.
+echo Press any key to close this window ...
+pause >nul
+endlocal & exit /b %RC%
+
+REM ---------------------------------------------------------------------------
+REM  Main flow
+REM ---------------------------------------------------------------------------
+:main
 echo === flowagent stop ===
 
 REM Stop backend by executable path under this project's bin\ directory.
@@ -23,4 +45,4 @@ taskkill /FI "WINDOWTITLE eq flowagent-frontend*" /F >nul 2>nul
 
 echo.
 echo Done.
-endlocal
+exit /b 0

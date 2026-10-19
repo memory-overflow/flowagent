@@ -498,7 +498,7 @@ func workflowSubTaskExecImpl(ctx context.Context, temp *model.TaskTemp) (data in
 
 // executingSystemPrompt 执行期 system prompt：通用 agent 人格 + 图片理解策略 + 对话已启用 skill。
 func executingSystemPrompt(ctx context.Context, chatID string) string {
-	systemPrompt := funcCallSystemPrompt + "\n\n" + imagePolicySection(ctx, chatID, nil)
+	systemPrompt := funcCallSystemPrompt + "\n\n" + workspacepkg.ShellHint() + "\n\n" + imagePolicySection(ctx, chatID, nil)
 	if skillConfigs, sErr := funcCallRegistry.toolProvider.LoadSkills(ctx, chatID); sErr != nil {
 		log.Printf("[func-call-actuator] load skills failed (ignore): %v", sErr)
 	} else if section := skillpkg.BuildPromptSection(skillConfigs); section != "" {
@@ -1175,7 +1175,7 @@ func callNames(calls []llm.ToolCall) []string {
 //   - mcpServerDAO 取 MCP server 配置
 //   - registry     MCP 工具注册表（须与 tool_call actuator 共享同一实例，
 //     保证暴露给 LLM 的工具名在 tool_call 侧能反查到）
-//   - convSkillDAO 查对话绑定的 Skill（prompt 型注入 system prompt，command 型作为工具）
+//   - convSkillDAO 查对话绑定的 Skill（注入 system prompt）
 //   - skillDAO     取 Skill 配置
 //   - defaultMCP   框架级 MCP server（fetch 精读，仅 deep_search 子任务注入；可空）
 //

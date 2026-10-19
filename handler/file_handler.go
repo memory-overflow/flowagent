@@ -283,6 +283,99 @@ func OpenFile(c *gin.Context) {
 	c.JSON(http.StatusOK, CommonResponse{Code: 0, Msg: "ok", ReqID: reqID})
 }
 
+// RevealFile 在文件管理器中定位工作区内的文件（打开所在目录并选中）。
+//
+// 请求：GET /api/v1/files/reveal?chat_id=<id>&path=<相对工作区路径>
+// path 与 download / open 一样经 Manager.Resolve 做沙箱校验。
+func RevealFile(c *gin.Context) {
+	reqID := ensureReqID(c)
+
+	if wsManager == nil {
+		writeError(c, http.StatusInternalServerError, "工作区未初始化", reqID)
+		return
+	}
+
+	chatID := strings.TrimSpace(c.Query("chat_id"))
+	relPath := strings.TrimSpace(c.Query("path"))
+	if chatID == "" || relPath == "" {
+		writeError(c, http.StatusBadRequest, "缺少 chat_id 或 path", reqID)
+		return
+	}
+
+	wsDir := wsManager.Dir(chatID)
+	absPath, err := wsManager.Resolve(wsDir, relPath)
+	if err != nil {
+		log.Printf("[file-handler][%s] reject reveal path chat=%s path=%s: %v", reqID, chatID, relPath, err)
+		writeError(c, http.StatusBadRequest, "非法路径: "+err.Error(), reqID)
+		return
+	}
+
+	st, err := os.Stat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeError(c, http.StatusNotFound, "文件不存在", reqID)
+			return
+		}
+		log.Printf("[file-handler][%s] stat failed: %v", reqID, err)
+		writeError(c, http.StatusInternalServerError, "读取文件失败", reqID)
+		return
+	}
+	if st.IsDir() {
+		writeError(c, http.StatusBadRequest, "path 指向目录，不是文件", reqID)
+		return
+	}
+
+	if err := revealLocal(absPath); err != nil {
+		log.Printf("[file-handler][%s] reveal failed: %v", reqID, err)
+		writeError(c, http.StatusInternalServerError, "定位文件失败: "+err.Error(), reqID)
+		return
+	}
+
+	log.Printf("[file-handler][%s] revealed chat=%s path=%s", reqID, chatID, relPath)
+	c.JSON(http.StatusOK, CommonResponse{Code: 0, Msg: "ok", ReqID: reqID})
+}
+
+// OpenWorkspace 在文件管理器中打开当前对话的工作空间目录。
+//
+// 请求：GET /api/v1/files/open-workspace?chat_id=<id>
+func OpenWorkspace(c *gin.Context) {
+	reqID := ensureReqID(c)
+
+	if wsManager == nil {
+		writeError(c, http.StatusInternalServerError, "工作区未初始化", reqID)
+		return
+	}
+
+	chatID := strings.TrimSpace(c.Query("chat_id"))
+	if chatID == "" {
+		writeError(c, http.StatusBadRequest, "缺少 chat_id", reqID)
+		return
+	}
+
+	// 校验对话存在，避免打开不存在的目录
+	convDAO := &dao.ConversationDAO{}
+	conv, err := convDAO.GetConversationByID(c.Request.Context(), chatID)
+	if err != nil {
+		log.Printf("[file-handler][%s] get conversation failed: %v", reqID, err)
+		writeError(c, http.StatusInternalServerError, "查询对话失败", reqID)
+		return
+	}
+	if conv == nil {
+		writeError(c, http.StatusNotFound, "对话不存在", reqID)
+		return
+	}
+
+	wsDir := wsManager.Dir(chatID)
+	if err := openDirLocal(wsDir); err != nil {
+		log.Printf("[file-handler][%s] open workspace failed: %v", reqID, err)
+		writeError(c, http.StatusInternalServerError, "打开工作空间失败: "+err.Error(), reqID)
+		return
+	}
+
+	log.Printf("[file-handler][%s] opened workspace chat=%s dir=%s", reqID, chatID, wsDir)
+	c.JSON(http.StatusOK, CommonResponse{Code: 0, Msg: "ok", ReqID: reqID})
+}
+
 // openLocal 用系统默认应用打开本地文件，按平台分发命令。
 //
 // 用 Start 而非 Run：open / xdg-open 把文件交给默认应用后立即返回，
@@ -294,6 +387,37 @@ func openLocal(path string) error {
 		cmd = exec.Command("open", path)
 	case "windows":
 		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", path)
+	default:
+		cmd = exec.Command("xdg-open", path)
+	}
+	return cmd.Start()
+}
+
+// revealLocal 在文件管理器中定位文件（打开所在目录并选中文件）。
+//
+// macOS 用 open -R；Windows 用 explorer /select,；Linux 没有「选中文件」
+// 的通用命令，退化为打开父目录。
+func revealLocal(path string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", "-R", path)
+	case "windows":
+		cmd = exec.Command("explorer", "/select,"+path)
+	default:
+		cmd = exec.Command("xdg-open", filepath.Dir(path))
+	}
+	return cmd.Start()
+}
+
+// openDirLocal 在文件管理器中打开目录。
+func openDirLocal(path string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", path)
+	case "windows":
+		cmd = exec.Command("explorer", path)
 	default:
 		cmd = exec.Command("xdg-open", path)
 	}
