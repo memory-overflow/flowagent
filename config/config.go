@@ -27,6 +27,42 @@ const (
 // scheduler 启动时都从同一份文件读，保证两个进程用的是同一个库。
 const DBConfigFileName = "db_config.json"
 
+// AgentSettingsFileName 保存可在运行时调整的 Agent 循环预算。
+const AgentSettingsFileName = "agent_settings.json"
+
+const (
+	DefaultPlannerMaxToolCallRounds     = 4
+	MinPlannerMaxToolCallRounds         = 1
+	MaxPlannerMaxToolCallRounds         = 20
+	DefaultSingleAgentMaxToolCallRounds = 100
+	MinSingleAgentMaxToolCallRounds     = 1
+	MaxSingleAgentMaxToolCallRounds     = 500
+)
+
+// AgentSettings 是规划器与单 Agent 各自的工具调用轮次预算。
+// 独立落盘，scheduler 每轮直接读取，因此保存后无需重启即可影响后续流转。
+type AgentSettings struct {
+	PlannerMaxToolCallRounds     int `json:"planner_max_tool_call_rounds"`
+	SingleAgentMaxToolCallRounds int `json:"single_agent_max_tool_call_rounds"`
+}
+
+func DefaultAgentSettings() AgentSettings {
+	return AgentSettings{
+		PlannerMaxToolCallRounds:     DefaultPlannerMaxToolCallRounds,
+		SingleAgentMaxToolCallRounds: DefaultSingleAgentMaxToolCallRounds,
+	}
+}
+
+func ValidateAgentSettings(cfg AgentSettings) error {
+	if cfg.PlannerMaxToolCallRounds < MinPlannerMaxToolCallRounds || cfg.PlannerMaxToolCallRounds > MaxPlannerMaxToolCallRounds {
+		return fmt.Errorf("planner_max_tool_call_rounds must be between %d and %d", MinPlannerMaxToolCallRounds, MaxPlannerMaxToolCallRounds)
+	}
+	if cfg.SingleAgentMaxToolCallRounds < MinSingleAgentMaxToolCallRounds || cfg.SingleAgentMaxToolCallRounds > MaxSingleAgentMaxToolCallRounds {
+		return fmt.Errorf("single_agent_max_tool_call_rounds must be between %d and %d", MinSingleAgentMaxToolCallRounds, MaxSingleAgentMaxToolCallRounds)
+	}
+	return nil
+}
+
 // Config 应用配置根结构
 type Config struct {
 	Server    ServerConfig    `yaml:"server"`
@@ -267,6 +303,63 @@ func SaveDBSettings(path string, cfg DatabaseConfig) error {
 		return fmt.Errorf("write db settings %s: %w", path, err)
 	}
 	return nil
+}
+
+// AgentSettingsPath 返回 Agent 运行设置的持久化路径。
+func AgentSettingsPath() string {
+	return filepath.Join(filepath.Dir(DBSettingsPath()), AgentSettingsFileName)
+}
+
+// LoadAgentSettings 读取 Agent 设置。文件不存在时返回默认值；已存在的旧文件
+// 若缺少新增字段，也按默认值补齐，保持向后兼容。
+func LoadAgentSettings(path string) (AgentSettings, error) {
+	cfg := DefaultAgentSettings()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cfg, nil
+		}
+		return cfg, fmt.Errorf("read agent settings %s: %w", path, err)
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return DefaultAgentSettings(), fmt.Errorf("parse agent settings %s: %w", path, err)
+	}
+	if err := ValidateAgentSettings(cfg); err != nil {
+		return DefaultAgentSettings(), err
+	}
+	return cfg, nil
+}
+
+func SaveAgentSettings(path string, cfg AgentSettings) error {
+	if err := ValidateAgentSettings(cfg); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal agent settings: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("create agent settings dir %s: %w", filepath.Dir(path), err)
+	}
+	// 先写临时文件再 rename，避免 scheduler 恰好读到半份 JSON。
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(data, '\n'), 0644); err != nil {
+		return fmt.Errorf("write agent settings %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("replace agent settings %s: %w", path, err)
+	}
+	return nil
+}
+
+// CurrentAgentSettings 在每个调度决策点读取最新设置。读取异常时沿用安全默认值，
+// 避免设置文件的瞬时 I/O 问题中断在途任务。
+func CurrentAgentSettings() AgentSettings {
+	cfg, err := LoadAgentSettings(AgentSettingsPath())
+	if err != nil {
+		return DefaultAgentSettings()
+	}
+	return cfg
 }
 
 // Load 从 YAML 文件加载配置

@@ -674,6 +674,8 @@ func (c *Client) parseStream(body io.Reader, onDelta func(llm.StreamDelta)) (*ll
 		}
 		if delta.ReasoningContent != "" {
 			reasonBuf.WriteString(delta.ReasoningContent)
+			// 思考链增量一并透传：调试页据此实时展示原始 reasoning_content。
+			onDelta(llm.StreamDelta{Reasoning: delta.ReasoningContent})
 		}
 		for _, tcd := range delta.ToolCalls {
 			acc := accs[tcd.Index]

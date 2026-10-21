@@ -966,6 +966,9 @@ func AnalyzeImageTool() *ToolDef {
 	return &ToolDef{
 		Name:        "analyze_image",
 		Description: "理解/分析工作区内的一张图片，返回图片的结构化描述（含图中文字、物体、布局、图表数据等）。当用户提供图片、需要识别或理解图中内容时优先使用本工具，不要用 read_file（图片是二进制会乱码）或 run_command 跑 OCR。",
+		// 图片理解要等待一次完整的多模态模型调用，可能包含较长推理。
+		// 对齐调度器 functionalCallTimeout=15m；workspace 是低层包，不能反向 import schedule。
+		Timeout: 15 * time.Minute,
 		InputSchema: objectSchema(map[string]interface{}{
 			"path":     strProp("图片路径，相对工作区（如 images/流程图.png）"),
 			"question": strProp("（可选）希望重点回答的关于图片的问题；不填则返回图片的通用结构化描述"),

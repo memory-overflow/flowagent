@@ -3,8 +3,10 @@ import {
   getDBConfig,
   updateDBConfig,
   testDBConfig,
+  getAgentSettings,
+  updateAgentSettings,
 } from '../services/api';
-import type { DBConfig, DBDriver } from '../types/api';
+import type { DBConfig, DBDriver, AgentSettings } from '../types/api';
 import { useT } from '../i18n';
 import { useTheme, type ThemeMode } from '../theme';
 import { useI18n, type Lang } from '../i18n';
@@ -38,11 +40,15 @@ export default function SettingsPage() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; msg: string } | null>(null);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [agentCfg, setAgentCfg] = useState<AgentSettings | null>(null);
+  const [agentSaving, setAgentSaving] = useState(false);
+  const [agentMsg, setAgentMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const fetch = useCallback(async () => {
     try {
-      const res = await getDBConfig();
+      const [res, agentRes] = await Promise.all([getDBConfig(), getAgentSettings()]);
       const d = res.data.data;
+      setAgentCfg(agentRes.data.data);
       setCfg(d);
       if (d) {
         setDriver(d.driver === 'sqlite' ? 'sqlite' : 'mysql');
@@ -107,6 +113,27 @@ export default function SettingsPage() {
       alert(t('settings.saveFailed', { msg: e.message }));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleAgentSave = async () => {
+    if (!agentCfg) return;
+    const planner = agentCfg.planner_max_tool_call_rounds;
+    const single = agentCfg.single_agent_max_tool_call_rounds;
+    if (!Number.isInteger(planner) || planner < 1 || planner > 20 || !Number.isInteger(single) || single < 1 || single > 500) {
+      setAgentMsg({ ok: false, text: t('settings.agentValidation') });
+      return;
+    }
+    setAgentSaving(true);
+    setAgentMsg(null);
+    try {
+      const res = await updateAgentSettings(agentCfg);
+      setAgentCfg(res.data.data);
+      setAgentMsg({ ok: true, text: t('settings.agentSaved') });
+    } catch (e: any) {
+      setAgentMsg({ ok: false, text: t('settings.agentSaveFailed', { msg: e?.response?.data?.msg || e.message }) });
+    } finally {
+      setAgentSaving(false);
     }
   };
 
@@ -177,6 +204,30 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+
+      {/* ---- Agent 工具调用轮次 ---- */}
+      {agentCfg && (
+        <div className="task-card">
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>{t('settings.agentTitle')}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>{t('settings.agentDesc')}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="form-group">
+              <label>{t('settings.plannerRounds')}</label>
+              <input className="form-input" type="number" min={1} max={20} step={1} value={agentCfg.planner_max_tool_call_rounds} onChange={(e) => setAgentCfg({ ...agentCfg, planner_max_tool_call_rounds: Number(e.target.value) })} />
+              <div className="form-hint">{t('settings.plannerRoundsHint')}</div>
+            </div>
+            <div className="form-group">
+              <label>{t('settings.singleAgentRounds')}</label>
+              <input className="form-input" type="number" min={1} max={500} step={1} value={agentCfg.single_agent_max_tool_call_rounds} onChange={(e) => setAgentCfg({ ...agentCfg, single_agent_max_tool_call_rounds: Number(e.target.value) })} />
+              <div className="form-hint">{t('settings.singleAgentRoundsHint')}</div>
+            </div>
+          </div>
+          <div style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center' }}>
+            <button className="btn btn-primary" onClick={handleAgentSave} disabled={agentSaving}>{agentSaving ? t('common.saving') : t('common.save')}</button>
+            {agentMsg && <span style={{ fontSize: 13, color: agentMsg.ok ? 'var(--success)' : 'var(--danger)' }}>{agentMsg.text}</span>}
+          </div>
+        </div>
+      )}
 
       {/* ---- 数据库连接 ---- */}
       <p style={{ marginTop: 20, fontSize: 13, color: 'var(--text-muted)' }}>

@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/memory-overflow/flowagent/config"
 	"github.com/memory-overflow/flowagent/dao"
 	"github.com/memory-overflow/flowagent/model"
 	"github.com/memory-overflow/flowagent/pkg/stream"
@@ -208,7 +209,7 @@ func (s *StageTransitionStore) resolveHint(
 	}
 
 	hint := &model.StageTransitionHint{
-		MaxToolCallRound: model.DefaultMaxToolCallRound,
+		MaxToolCallRound: config.CurrentAgentSettings().SingleAgentMaxToolCallRounds,
 	}
 
 	turnDAO := &dao.TaskTurnDAO{}

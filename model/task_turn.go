@@ -229,6 +229,11 @@ type TurnMessage struct {
 type TurnLLMOutput struct {
 	// Text 模型返回的纯文本
 	Text string `json:"text,omitempty"`
+	// Reasoning 推理模型的思考链原始内容（reasoning_content）。
+	//
+	// 与 Text 相互独立：推理模型先吐思考链再吐正文，两者都要落库，
+	// 调试页据此还原「模型到底想了什么」。非推理模型为空。
+	Reasoning string `json:"reasoning,omitempty"`
 	// ToolCalls 模型请求的工具调用列表
 	ToolCalls []TurnToolCallReq `json:"tool_calls,omitempty"`
 	// PromptTokens / CompletionTokens / TotalTokens token 消耗

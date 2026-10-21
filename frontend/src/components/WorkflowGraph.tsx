@@ -17,6 +17,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import type { ConversationWorkflow, WorkflowNode, TaskStatus } from '../types/api';
 import Markdown from './Markdown';
+import ToolCalls from './ToolCalls';
 import { fmtTokens } from './ContextUsage';
 import DurationText, { useDurationTooltip } from './DurationText';
 import { useT, type Translate } from '../i18n';
@@ -607,6 +608,15 @@ export function WorkflowNodeDetail({ node, nodes, onClose, liveThink }: Workflow
         <div className="wf-detail-output">
           <div className="wf-detail-output-label">{t('workflow.output')}</div>
           <Markdown compact>{node.output.reply_text}</Markdown>
+        </div>
+      )}
+
+      {!!node.output?.tool_calls?.length && (
+        <div className="wf-detail-output wf-detail-tool-calls">
+          <div className="wf-detail-output-label">
+            {t('workflow.toolCalls', { n: node.output.tool_calls.length })}
+          </div>
+          <ToolCalls calls={node.output.tool_calls} />
         </div>
       )}
 

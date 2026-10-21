@@ -56,14 +56,18 @@ func modelToSpec(m *model.ModelConfig) *llmreg.ModelSpec {
 // 让未做前端配置的部署照常运行（行为与改造前一致）。
 // provider 取值沿用 config 的旧口径 gemini/openai/azure，其中 azure 映射到
 // llmreg 的 gpt 协议。
-func buildFallbackClient(cfg *config.Config) llm.Client {
-	// provider→protocol 映射统一走 config.LLMConfig.ModelProtocol()，
-	// 与 server 侧「种子默认模型」共用同一份口径（azure → gpt）。
-	return llmreg.BuildClient(llmreg.ModelSpec{
+func fallbackModelSpec(cfg *config.Config) llmreg.ModelSpec {
+	return llmreg.ModelSpec{
 		Protocol:   cfg.LLM.ModelProtocol(),
 		BaseURL:    cfg.LLM.BaseURL,
 		APIKey:     cfg.LLM.APIKey,
 		Model:      cfg.LLM.Model,
 		APIVersion: cfg.LLM.APIVersion,
-	})
+	}
+}
+
+func buildFallbackClient(cfg *config.Config) llm.Client {
+	// provider→protocol 映射统一走 config.LLMConfig.ModelProtocol()，
+	// 与 server 侧「种子默认模型」共用同一份口径（azure → gpt）。
+	return llmreg.BuildClient(fallbackModelSpec(cfg))
 }

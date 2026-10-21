@@ -81,10 +81,13 @@ func chatWithToolsStreaming(
 	}
 
 	return sc.ChatWithToolsStream(guardCtx, messages, tools, choice, opts, func(d llm.StreamDelta) {
-		// 一个 delta 事件可同时携带文本增量与工具调用分片，但通常只有其一非空。
+		// 一个 delta 事件可同时携带文本增量、思考链增量与工具调用分片，但通常只有其一非空。
 		data := map[string]interface{}{}
 		if d.Text != "" {
 			data["text"] = d.Text
+		}
+		if d.Reasoning != "" {
+			data["reasoning"] = d.Reasoning
 		}
 		if d.ToolCallDelta != nil {
 			data["tool_call"] = map[string]interface{}{

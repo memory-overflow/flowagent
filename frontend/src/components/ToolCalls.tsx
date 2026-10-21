@@ -39,8 +39,9 @@ export default function ToolCalls({ calls }: Props) {
         // 优先用模型在工具 schema 的 summary 参数里写的说明；
         // 为空时降级为 server/tool_name 拼接（保持与历史数据兼容）
         const summary = c.summary?.trim();
-        const fallback = c.server_name ? `${c.server_name}/${c.tool_name}` : c.tool_name;
-        const label = summary || fallback;
+        const toolName = c.server_name ? `${c.server_name}/${c.tool_name}` : c.tool_name;
+        // summary 为空的历史记录只展示工具名，避免出现「【工具名】工具名」。
+        const label = summary ? `【${toolName}】${summary}` : `【${toolName}】`;
         const usingSummary = !!summary;
 
         return (
@@ -57,7 +58,7 @@ export default function ToolCalls({ calls }: Props) {
                   // 展示 summary 时把 server/tool_name 拼接到折叠态作为补充元数据，
                   // 否则点击展开后用户看不到「这是哪个工具」
                   <div className="tool-meta">
-                    {t('toolCalls.tool')}<code>{fallback}</code>
+                    {t('toolCalls.tool')}<code>{toolName}</code>
                   </div>
                 )}
                 {c.input && (

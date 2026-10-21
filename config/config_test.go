@@ -129,3 +129,54 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+func TestAgentSettingsDefaultsAndRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), AgentSettingsFileName)
+	got, err := LoadAgentSettings(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != DefaultAgentSettings() {
+		t.Fatalf("defaults = %+v, want %+v", got, DefaultAgentSettings())
+	}
+
+	want := AgentSettings{PlannerMaxToolCallRounds: 7, SingleAgentMaxToolCallRounds: 123}
+	if err := SaveAgentSettings(path, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err = LoadAgentSettings(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("round trip = %+v, want %+v", got, want)
+	}
+}
+
+func TestAgentSettingsValidation(t *testing.T) {
+	tests := []AgentSettings{
+		{PlannerMaxToolCallRounds: 0, SingleAgentMaxToolCallRounds: 100},
+		{PlannerMaxToolCallRounds: 21, SingleAgentMaxToolCallRounds: 100},
+		{PlannerMaxToolCallRounds: 4, SingleAgentMaxToolCallRounds: 0},
+		{PlannerMaxToolCallRounds: 4, SingleAgentMaxToolCallRounds: 501},
+	}
+	for _, tt := range tests {
+		if err := ValidateAgentSettings(tt); err == nil {
+			t.Errorf("ValidateAgentSettings(%+v) unexpectedly succeeded", tt)
+		}
+	}
+}
+
+func TestLoadAgentSettingsFillsMissingFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), AgentSettingsFileName)
+	if err := os.WriteFile(path, []byte(`{"planner_max_tool_call_rounds":8}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadAgentSettings(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PlannerMaxToolCallRounds != 8 || got.SingleAgentMaxToolCallRounds != DefaultSingleAgentMaxToolCallRounds {
+		t.Fatalf("backward-compatible load = %+v", got)
+	}
+}

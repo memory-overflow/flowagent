@@ -41,6 +41,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/memory-overflow/flowagent/config"
 	"github.com/memory-overflow/flowagent/dao"
 	"github.com/memory-overflow/flowagent/model"
 	"github.com/memory-overflow/flowagent/pkg/llm"
@@ -48,13 +49,6 @@ import (
 	workspacepkg "github.com/memory-overflow/flowagent/pkg/workspace"
 	"github.com/memory-overflow/flowagent/schedule/container"
 )
-
-// planningMaxToolCallRound 规划期允许的最大工具调研轮次。
-//
-// 规划期与执行期共享同一个 tool_call 轮次计数（都统计 tool_call turn 数），
-// 若不单独限制，模型可能把全部预算耗在调研上，真正干活时无轮次可用。
-// 达到该轮次仍未 submit_plan 时强制降级切执行期。
-const planningMaxToolCallRound = 4
 
 // planningMaxReplanRounds 规划期因「输出节点校验」不过而允许的最大重规划次数。
 //
@@ -578,11 +572,11 @@ func planningPhaseImpl(ctx context.Context, temp *model.TaskTemp) (data interfac
 
 	// 5. 调研轮次是否已耗尽。耗尽后不再给真实工具，只留 submit_plan，
 	// 逼模型立即收口（而非直接判失败，规划结果仍由模型给出更准）。
-	round, _, _, _ := resolveLoopState(ctx, temp.TaskID, model.PhasePlanning)
-	researchExhausted := round >= planningMaxToolCallRound
+	round, maxRound, _, _ := resolveLoopState(ctx, temp.TaskID, model.PhasePlanning)
+	researchExhausted := round >= maxRound
 	if researchExhausted {
 		log.Printf("[func-call-actuator][%s] planning research budget exhausted (%d/%d), submit_plan only",
-			temp.TaskID, round, planningMaxToolCallRound)
+			temp.TaskID, round, maxRound)
 		tools = []llm.Tool{buildSubmitPlanTool()}
 	}
 
@@ -767,7 +761,7 @@ func planningPhaseImpl(ctx context.Context, temp *model.TaskTemp) (data interfac
 			finishPlanningTurn(ctx, temp, turn.ID, turn.TurnSeq, result)
 			setResearchHint(temp.TaskID, round)
 			log.Printf("[func-call-actuator][%s] planning turn #%d done → tool_call (research round %d/%d, %d calls: %v)",
-				temp.TaskID, turn.TurnSeq, round, planningMaxToolCallRound,
+				temp.TaskID, turn.TurnSeq, round, maxRound,
 				len(realCalls), callNames(realCalls))
 			return nil, nil
 
@@ -1384,14 +1378,14 @@ func finishPlanningTurn(
 // 同时把轮次与熔断计数归零 —— 规划期调研消耗的 tool_call 轮次
 // 不该占用执行期干活的预算，规划期的工具失败也不该让执行期一进来就接近熔断。
 // 两个 phase 各自持有一份完整预算，是有意的取舍：
-// 规划期上限 planningMaxToolCallRound 已单独约束，不存在无限循环风险。
+// 规划期上限由 Agent 设置单独约束，不存在无限循环风险。
 func setPlanSubmittedHint(taskID string) {
 	store := container.GetTransitionStore()
 	store.SetHint(taskID, &model.StageTransitionHint{
 		PlanSubmitted:    true,
 		NeedToolCall:     false,
 		ToolCallRound:    0,
-		MaxToolCallRound: model.DefaultMaxToolCallRound,
+		MaxToolCallRound: config.CurrentAgentSettings().SingleAgentMaxToolCallRounds,
 	})
 }
 
@@ -1407,7 +1401,7 @@ func setPlanDelegatedHint(taskID string) {
 		PlanSubmitted:    false,
 		NeedToolCall:     false,
 		ToolCallRound:    0,
-		MaxToolCallRound: model.DefaultMaxToolCallRound,
+		MaxToolCallRound: config.CurrentAgentSettings().SingleAgentMaxToolCallRounds,
 	})
 }
 
@@ -1417,13 +1411,11 @@ func setResearchHint(taskID string, round int) {
 	hint := store.GetHint(taskID)
 	if hint == nil {
 		hint = &model.StageTransitionHint{
-			MaxToolCallRound: model.DefaultMaxToolCallRound,
+			MaxToolCallRound: config.CurrentAgentSettings().SingleAgentMaxToolCallRounds,
 			ToolCallRound:    round,
 		}
 	}
-	if hint.MaxToolCallRound <= 0 {
-		hint.MaxToolCallRound = model.DefaultMaxToolCallRound
-	}
+	hint.MaxToolCallRound = config.CurrentAgentSettings().PlannerMaxToolCallRounds
 	hint.PlanSubmitted = false
 	hint.NeedToolCall = true
 	store.SetHint(taskID, hint)

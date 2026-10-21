@@ -64,6 +64,7 @@ export const debugNS = {
     // ---- 流式输出块 ----
     streamLive: 'STREAM · 实时输出',
     waitingModelOutput: '（等待模型输出…）',
+    reasoningLive: '思考链 · 实时（reasoning_content）',
     toolCallLive: 'TOOL CALL · 实时',
     toolCallLiveDesc: '模型发起的工具调用 raw 分片累积',
     noFuncNameYet: '（尚未收到函数名）',
@@ -140,6 +141,7 @@ export const debugNS = {
     // ---- Streaming blocks ----
     streamLive: 'STREAM · live output',
     waitingModelOutput: '(waiting for model output…)',
+    reasoningLive: 'Reasoning · live (reasoning_content)',
     toolCallLive: 'TOOL CALL · live',
     toolCallLiveDesc: 'Raw fragments accumulated from model-initiated tool calls',
     noFuncNameYet: '(function name not received yet)',

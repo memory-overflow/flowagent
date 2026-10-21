@@ -1214,8 +1214,13 @@ func trimDetailToolCallOutputs(out *model.AgentOutputData) {
 //   - 失败的任务由容器补写，存在时序窗口；且 planning/工具阶段失败时
 //     failed_reason 只有一句话，中间过程恰恰是排查关键
 //
-// 所以对「尚无 think_process」的任务一律实时重建。已有的不覆盖 ——
-// 终态由 actuator 写入，包含最完整的信息。
+// 重建规则按任务状态分流：
+//   - 终态任务：think_process 已由 actuator（成功）或容器（失败补写）写入，
+//     是最完整的一版，已有的不覆盖。
+//   - running 任务：think_process 可能是「失败重试残留的过期快照」——早期
+//     失败收口时 ToFailedStatus 把 task_output 写成了旧快照，框架自动重试
+//     恢复 running 后 task_output 不清空；若不重建，前端会一直卡在旧快照，
+//     看不到后续实时进展。因此 running 任务一律实时重建。
 func enrichThinkProcess(
 	ctx *gin.Context, turnDAO *dao.TaskTurnDAO,
 	t *model.Task, detail map[string]interface{},
@@ -1226,8 +1231,9 @@ func enrichThinkProcess(
 		return
 	}
 
-	// 已有非空 think_process 则不动
-	if out, ok := detail["agent_output"].(model.AgentOutputData); ok && len(out.ThinkProcess) > 0 {
+	// 终态任务且已有非空 think_process：actuator/容器已写入最完整一版，不重建。
+	// running 任务：实时重建，覆盖失败重试残留的过期快照。
+	if !shouldRebuildThinkProcess(t, detail) {
 		return
 	}
 
@@ -1240,6 +1246,20 @@ func enrichThinkProcess(
 		return
 	}
 	detail["agent_output"] = out
+}
+
+// shouldRebuildThinkProcess 判断是否要实时重建 think_process。
+//
+// 终态任务（completed / failed / stopped / partial_failed）的 think_process
+// 已由 actuator（成功）或容器（失败补写）写入最完整一版，已有非空就不重建；
+// 其余（running / queued）任务的 think_process 可能是「失败重试残留的过期
+// 快照」，必须实时重建，否则前端会一直卡在旧快照、看不到后续实时进展。
+func shouldRebuildThinkProcess(t *model.Task, detail map[string]interface{}) bool {
+	if !t.IsTerminal() {
+		return true
+	}
+	out, ok := detail["agent_output"].(model.AgentOutputData)
+	return !ok || len(out.ThinkProcess) == 0
 }
 
 // boundWorkflowSnapshot 一条工作流的展示快照：DAG + 整体状态。

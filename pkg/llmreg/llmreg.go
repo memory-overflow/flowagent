@@ -136,10 +136,11 @@ type cacheEntry struct {
 // 缓存命中避免「同一模型每轮 turn 都重建 http.Client」浪费连接池；TTL 保证
 // server 侧的模型配置改动能在窗口内传播到 scheduler（见 resolverCacheTTL）。
 type Resolver struct {
-	loader   ModelLoader
-	fallback llm.Client
-	mu       sync.RWMutex
-	cache    map[string]cacheEntry
+	loader       ModelLoader
+	fallback     llm.Client
+	fallbackSpec *ModelSpec
+	mu           sync.RWMutex
+	cache        map[string]cacheEntry
 }
 
 // NewResolver 创建解析器。fallback 在「无默认模型 / 未配置任何模型」时兜底，
@@ -149,6 +150,19 @@ func NewResolver(loader ModelLoader, fallback llm.Client) *Resolver {
 		loader:   loader,
 		fallback: fallback,
 		cache:    make(map[string]cacheEntry),
+	}
+}
+
+// NewResolverWithFallbackSpec 创建带可重建 fallback 规格的解析器。
+// 普通 Resolve 仍使用 provider 默认超时；只有 ResolveWithTimeout 会复制规格并
+// 覆盖 Timeout，供 analyze_image 等需要更长单次调用上限的专用路径使用。
+func NewResolverWithFallbackSpec(loader ModelLoader, fallbackSpec ModelSpec) *Resolver {
+	spec := fallbackSpec
+	return &Resolver{
+		loader:       loader,
+		fallback:     BuildClient(spec),
+		fallbackSpec: &spec,
+		cache:        make(map[string]cacheEntry),
 	}
 }
 
@@ -191,6 +205,33 @@ func (r *Resolver) Resolve(ctx context.Context, id string) (llm.Client, error) {
 		r.mu.Unlock()
 	}
 	return client, nil
+}
+
+// ResolveWithTimeout 解析模型并为这一次用途构建指定超时的独立客户端。
+// 它不读写普通 Resolve 的客户端缓存，避免专用超时污染普通对话和工作流子任务。
+func (r *Resolver) ResolveWithTimeout(ctx context.Context, id string, timeout time.Duration) (llm.Client, error) {
+	var spec *ModelSpec
+	var err error
+	if r.loader != nil {
+		if id != "" {
+			spec, err = r.loader.LoadSpec(ctx, id)
+		} else {
+			spec, err = r.loader.LoadDefaultSpec(ctx)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if spec == nil && r.fallbackSpec != nil {
+		copySpec := *r.fallbackSpec
+		spec = &copySpec
+	}
+	if spec == nil {
+		return nil, fmt.Errorf("llmreg: no rebuildable model configured (id=%q)", id)
+	}
+	copySpec := *spec
+	copySpec.Timeout = timeout
+	return BuildClient(copySpec), nil
 }
 
 // Invalidate 使指定模型的缓存立即失效。

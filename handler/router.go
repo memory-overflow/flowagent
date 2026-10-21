@@ -50,6 +50,8 @@ func RegisterRoutes(router *gin.RouterGroup) {
 		settings.POST("/db/get", Wrap(GetDBConfigBinder, GetDBConfig))
 		settings.POST("/db/update", Wrap(UpdateDBConfigBinder, UpdateDBConfig))
 		settings.POST("/db/test", Wrap(TestDBConfigBinder, TestDBConfig))
+		settings.POST("/agent/get", Wrap(GetAgentSettingsBinder, GetAgentSettings))
+		settings.POST("/agent/update", Wrap(UpdateAgentSettingsBinder, UpdateAgentSettings))
 	}
 
 	// ========== 全局检索引擎配置模块 ==========

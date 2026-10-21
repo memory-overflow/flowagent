@@ -84,6 +84,8 @@ export default function ChatPage() {
   // 流式文本缓冲：task_id -> 已收到的 delta 增量拼成的实时文本
   const [streamText, setStreamText] = useState<Record<string, string>>({});
   const streamTextRef = useRef<Record<string, string>>({});
+  // 各任务最近一次收到 delta 的 turn_id：跨 turn 换行分隔用。task_id -> turn_id。
+  const lastTurnIdRef = useRef<Record<string, number>>({});
   // 正在调用的工具：task_id -> { turnId, toolName }。由 tool_calling 事件写入、
   // turn_done / task_done 清除，用于在思考过程中实时显示「正在调用 XXX 工具…」。
   const [callingTools, setCallingTools] = useState<Record<string, CallingTool>>({});
@@ -227,6 +229,7 @@ export default function ChatPage() {
       await retryTask(taskId);
       // 清掉该任务遗留的流式文本缓冲，避免重试后与新回复串行
       delete streamTextRef.current[taskId];
+      delete lastTurnIdRef.current[taskId];
       setStreamText({ ...streamTextRef.current });
       await fetchDetail();
     } catch (e: any) {
@@ -275,6 +278,7 @@ export default function ChatPage() {
     try {
       await stopTask(taskId);
       delete streamTextRef.current[taskId];
+      delete lastTurnIdRef.current[taskId];
       setStreamText({ ...streamTextRef.current });
       await fetchDetail();
     } catch (e: any) {
@@ -410,8 +414,17 @@ export default function ChatPage() {
     for (const taskId of pollingTasks) {
       if (sseClosersRef.current[taskId]) continue; // 已订阅，跳过
       const close = subscribeTaskStream(taskId, {
-        onDelta: (text) => {
-          streamTextRef.current[taskId] = (streamTextRef.current[taskId] || '') + text;
+        onDelta: (text, ev) => {
+          // 跨 turn 换行分隔：多个 turn 的文本（规划期 / 各轮叙述 / 最终答案）
+          // 若直接拼在一起会连成一大坨，换 turn 时补一个空行把它们区分开。
+          const prevTurn = lastTurnIdRef.current[taskId];
+          const cur = streamTextRef.current[taskId] || '';
+          let separator = '';
+          if (ev.turn_id != null && prevTurn != null && prevTurn !== ev.turn_id && cur) {
+            separator = '\n\n';
+          }
+          if (ev.turn_id != null) lastTurnIdRef.current[taskId] = ev.turn_id;
+          streamTextRef.current[taskId] = cur + separator + text;
           setStreamText({ ...streamTextRef.current });
         },
         onToolCalling: (ev) => {
@@ -453,6 +466,7 @@ export default function ChatPage() {
         onTaskDone: () => {
           // 清理缓冲 + 全量刷新拉最终 reply_text。close 由 api.ts 内部完成。
           delete streamTextRef.current[taskId];
+          delete lastTurnIdRef.current[taskId];
           setStreamText({ ...streamTextRef.current });
           delete callingToolsRef.current[taskId];
           setCallingTools({ ...callingToolsRef.current });

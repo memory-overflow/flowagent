@@ -122,6 +122,16 @@ export const zh = {
   // ---- 设置页：数据库连接 ----
   settings: {
     title: '系统设置',
+    agentTitle: 'Agent 工具调用轮次',
+    agentDesc: '限制规划调研与单 Agent 执行的工具调用批次。保存后立即影响新任务和在途任务，无需重启。',
+    plannerRounds: '规划器最大工具调用轮次',
+    plannerRoundsHint: '1–20；达到上限后仅允许提交规划。',
+    singleAgentRounds: '单 Agent 最大工具调用轮次',
+    singleAgentRoundsHint: '1–500；达到上限后要求 Agent 直接总结。',
+    agentSaved: '已保存并立即生效',
+    agentValidation: '请输入有效整数：规划器 1–20，单 Agent 1–500。',
+    agentSaveFailed: '保存 Agent 设置失败: {msg}',
+
     introLead:
       '数据库连接。云上 MySQL 每次查询都要跨公网往返、延迟很高，本地调试可切到本机 MySQL 或 sqlite（纯本地文件，无网络往返）。配置保存在服务端',
     introTail:

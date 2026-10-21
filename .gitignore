@@ -45,6 +45,10 @@ frontend/node_modules
 # 数据库「系统设置」：含本机数据库密码，不进仓库（缺失时回落到 conf.yaml 的 database 块）
 config/db_config.json
 
+# 「系统设置」页写入的运行时参数（planner / 单 agent 轮次上限等），
+# 属本机运行态数据，缺失时回落到内置默认值，不进仓库
+config/agent_settings.json
+
 # 主配置：从 config.example.yaml 复制生成，含真实密码/地址，不进仓库
 config/config.yaml
 

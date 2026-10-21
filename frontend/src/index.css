@@ -384,6 +384,9 @@ a:hover { color: var(--accent-hover); }
 
 .conv-item:hover .conv-actions { display: flex; }
 
+/* 编辑标题时释放操作按钮占用的横向空间，让输入框使用完整内容区宽度。 */
+.conv-item.editing .conv-actions { display: none; }
+
 /* ---- Main Area ---- */
 
 .main-area {
@@ -2826,6 +2829,23 @@ a:hover { color: var(--accent-hover); }
   font-weight: 600;
   color: var(--text-muted);
   margin-bottom: 8px;
+}
+
+/* 节点详情抽屉较窄：仅在抽屉内允许工具标题换行，并保持耗时靠右。 */
+.wf-detail-tool-calls .tool-calls {
+  margin-top: 0;
+}
+
+.wf-detail-tool-calls .tool-name {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.wf-detail-tool-calls .tool-cost {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 /* ---- 工作流结果分栏（ChatPage 右侧嵌入式面板） ---- */

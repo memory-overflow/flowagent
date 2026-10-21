@@ -38,6 +38,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/memory-overflow/flowagent/config"
 	"github.com/memory-overflow/flowagent/dao"
 	"github.com/memory-overflow/flowagent/model"
 	"github.com/memory-overflow/flowagent/pkg/llm"
@@ -885,9 +886,7 @@ func runExecutingLoop(
 			ToolCallRound:    round,
 		}
 	}
-	if hint.MaxToolCallRound <= 0 {
-		hint.MaxToolCallRound = model.DefaultMaxToolCallRound
-	}
+	hint.MaxToolCallRound = maxRound
 	hint.NeedToolCall = needToolCall
 	// 必须显式清零：规划期提交规划时置过 true，若沿用到执行期，
 	// 状态机会一直判「刚提交规划」而把任务反复拉回 functional_call_wait，永不收口。
@@ -952,12 +951,14 @@ func appendFinalRoundInstruction(messages []llm.Message, maxRound int) []llm.Mes
 func resolveLoopState(
 	ctx context.Context, taskID string, phase model.TaskPhase,
 ) (round, maxRound, consecutiveFails, repeatedCalls int) {
-	maxRound = model.DefaultMaxToolCallRound
+	settings := config.CurrentAgentSettings()
+	if phase == model.PhasePlanning {
+		maxRound = settings.PlannerMaxToolCallRounds
+	} else {
+		maxRound = settings.SingleAgentMaxToolCallRounds
+	}
 	if hint := container.GetTransitionStore().GetHint(taskID); hint != nil {
 		round = hint.ToolCallRound
-		if hint.MaxToolCallRound > 0 {
-			maxRound = hint.MaxToolCallRound
-		}
 		return round, maxRound, hint.ConsecutiveFailures, hint.RepeatedToolCallCount
 	}
 	return int(countToolCallRoundInPhase(ctx, taskID, phase)), maxRound, 0, 0

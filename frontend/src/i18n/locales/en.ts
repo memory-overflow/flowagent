@@ -114,6 +114,15 @@ export const en = {
 
   settings: {
     title: 'Settings',
+    agentTitle: 'Agent Tool-call Rounds',
+    agentDesc: 'Limits tool-call batches for planning research and single-agent execution. Changes apply immediately to new and running tasks.',
+    plannerRounds: 'Planner maximum tool-call rounds',
+    plannerRoundsHint: '1–20; only plan submission remains available after the limit.',
+    singleAgentRounds: 'Single-agent maximum tool-call rounds',
+    singleAgentRoundsHint: '1–500; the agent must summarize after the limit.',
+    agentSaved: 'Saved and applied immediately',
+    agentValidation: 'Enter integers in range: planner 1–20, single agent 1–500.',
+    agentSaveFailed: 'Failed to save agent settings: {msg}',
     introLead:
       'Database connection. Cloud MySQL pays a public-network round trip on every query, so for local debugging you can switch to a local MySQL or sqlite (a plain local file, zero network). Config is stored on the server at',
     introTail:

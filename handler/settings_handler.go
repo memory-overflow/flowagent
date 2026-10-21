@@ -225,3 +225,33 @@ func buildDBConfigItem(cfg *config.DatabaseConfig) *DBConfigItem {
 	}
 	return item
 }
+
+// ============================================================
+// 系统设置 —— Agent 工具调用轮次
+// ============================================================
+
+func GetAgentSettings(ctx *gin.Context, req interface{}) (interface{}, error) {
+	cfg, err := config.LoadAgentSettings(config.AgentSettingsPath())
+	if err != nil {
+		return nil, &APIError{Code: http.StatusInternalServerError, Msg: "读取 Agent 设置失败: " + err.Error()}
+	}
+	return cfg, nil
+}
+
+func GetAgentSettingsBinder() interface{} { return &struct{}{} }
+
+func UpdateAgentSettings(ctx *gin.Context, req interface{}) (interface{}, error) {
+	body, ok := req.(*config.AgentSettings)
+	if !ok || body == nil {
+		return nil, &APIError{Code: http.StatusBadRequest, Msg: "请求参数格式错误"}
+	}
+	if err := config.ValidateAgentSettings(*body); err != nil {
+		return nil, &APIError{Code: http.StatusBadRequest, Msg: err.Error()}
+	}
+	if err := config.SaveAgentSettings(config.AgentSettingsPath(), *body); err != nil {
+		return nil, &APIError{Code: http.StatusInternalServerError, Msg: "保存 Agent 设置失败: " + err.Error()}
+	}
+	return *body, nil
+}
+
+func UpdateAgentSettingsBinder() interface{} { return &config.AgentSettings{} }

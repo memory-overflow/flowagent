@@ -90,6 +90,10 @@ export default function DebugPage() {
   const [streamText, setStreamText] = useState<Record<number, string>>({});
   const streamTextRef = useRef<Record<number, string>>({});
 
+  // 思考链流式缓冲：turn_seq -> 已收到的 reasoning_content 增量拼成的实时文本。
+  const [streamReasoning, setStreamReasoning] = useState<Record<number, string>>({});
+  const streamReasoningRef = useRef<Record<number, string>>({});
+
   // 工具调用流式累积：turn_seq -> index -> { id, name, args }。
   const [streamToolCalls, setStreamToolCalls] = useState<StreamToolCalls>({});
   const streamToolCallsRef = useRef<StreamToolCalls>({});
@@ -146,6 +150,11 @@ export default function DebugPage() {
         if (ev.turn_seq == null) return;
         streamTextRef.current[ev.turn_seq] = (streamTextRef.current[ev.turn_seq] || '') + text;
         setStreamText({ ...streamTextRef.current });
+      },
+      onReasoning: (text, ev) => {
+        if (ev.turn_seq == null) return;
+        streamReasoningRef.current[ev.turn_seq] = (streamReasoningRef.current[ev.turn_seq] || '') + text;
+        setStreamReasoning({ ...streamReasoningRef.current });
       },
       onToolCall: (tc, ev) => {
         if (ev.turn_seq == null) return;
@@ -243,6 +252,7 @@ export default function DebugPage() {
             open={!!openTurns[t.turn_seq]}
             onToggle={() => setOpenTurns((prev) => ({ ...prev, [t.turn_seq]: !prev[t.turn_seq] }))}
             streamText={streamText[t.turn_seq]}
+            streamReasoning={streamReasoning[t.turn_seq]}
             streamToolCalls={streamToolCalls[t.turn_seq]}
           />
         ))}
@@ -443,11 +453,12 @@ function UserInputBlock({ text, open, onToggle }: { text?: string; open: boolean
 // 单条 turn
 // ============================================================
 
-function TurnCard({ turn, open, onToggle, streamText, streamToolCalls }: {
+function TurnCard({ turn, open, onToggle, streamText, streamReasoning, streamToolCalls }: {
   turn: TurnDebugView;
   open: boolean;
   onToggle: () => void;
   streamText?: string;
+  streamReasoning?: string;
   streamToolCalls?: Record<number, ToolCallAcc>;
 }) {
   const t = useT();
@@ -568,6 +579,12 @@ function TurnCard({ turn, open, onToggle, streamText, streamToolCalls }: {
             </div>
           )}
 
+          {/* 思考链（reasoning_content）实时输出：推理模型先吐思考再吐正文，
+              这里是原始思考链，默认展开、可复制，与上面的正文 stream 分开。 */}
+          {isStreaming && streamReasoning && (
+            <RawBlock label={t('debug.reasoningLive')} raw={streamReasoning} color="#a855f7" defaultOpen />
+          )}
+
           {/* 工具调用的 raw 流式输出：按 tool_call index 归并 arguments 分片，
               展示模型正在发起的函数名与尚未拼完的参数 JSON。 */}
           {isStreaming && streamToolCalls && Object.keys(streamToolCalls).length > 0 && (
@@ -602,7 +619,7 @@ function TurnCard({ turn, open, onToggle, streamText, streamToolCalls }: {
 // raw JSON 块：pretty-print + 折叠 + 复制
 // ============================================================
 
-function RawBlock({ label, raw, color }: { label: string; raw?: string; color: string }) {
+function RawBlock({ label, raw, color, defaultOpen }: { label: string; raw?: string; color: string; defaultOpen?: boolean }) {
   const t = useT();
   // pretty-print：能解析就格式化，不能就原样
   const text = (() => {
@@ -617,8 +634,8 @@ function RawBlock({ label, raw, color }: { label: string; raw?: string; color: s
   const lineCount = text ? text.split('\n').length : 0;
   const longContent = lineCount > COLLAPSE_LINE_THRESHOLD;
 
-  // 超长默认折叠，短内容始终展开
-  const [open, setOpen] = useState(!longContent);
+  // 超长默认折叠，短内容始终展开；defaultOpen 显式指定时以它为准（思考链默认展开）。
+  const [open, setOpen] = useState(defaultOpen ?? !longContent);
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {

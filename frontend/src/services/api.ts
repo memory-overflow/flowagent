@@ -13,6 +13,7 @@ import type {
   SearchConfig,
   SearchTestResult,
   DBConfig,
+  AgentSettings,
   DBConfigUpdateResult,
   DBTestResult,
   WorkflowListItem,
@@ -517,6 +518,14 @@ export function testModel(params: {
 // 保存后立即热生效（scheduler 由设置文件 watcher 在 2s 内跟随）。
 // ============================================================
 
+export function getAgentSettings() {
+  return http.post<CommonResponse<AgentSettings>>('/settings/agent/get', {});
+}
+
+export function updateAgentSettings(params: AgentSettings) {
+  return http.post<CommonResponse<AgentSettings>>('/settings/agent/update', params);
+}
+
 export function getDBConfig() {
   return http.post<CommonResponse<DBConfig>>('/settings/db/get', {});
 }
@@ -755,6 +764,8 @@ export interface StreamEvent {
   turn_seq?: number;
   data?: {
     text?: string;
+    /** 思考链增量（reasoning_content），推理模型才有 */
+    reasoning?: string;
     tool_call?: ToolCallDelta;
     /** tool_calling 事件携带：正在被调用的工具名 */
     tool_name?: string;
@@ -786,6 +797,8 @@ export function subscribeTaskStream(
   handlers: {
     /** delta 增量文本；ev 携带 turn_id/turn_seq 供按 turn 关联（调试页实时输出用） */
     onDelta?: (text: string, ev: StreamEvent) => void;
+    /** delta 思考链增量（reasoning_content）；ev 携带 turn_id/turn_seq，调试页实时展示原始思考链 */
+    onReasoning?: (text: string, ev: StreamEvent) => void;
     /** 工具调用分片增量；ev 携带 turn_id/turn_seq，供调试页展示完整 raw 流式输出 */
     onToolCall?: (tc: ToolCallDelta, ev: StreamEvent) => void;
     /** 工具调用开始执行（turn 已建、尚未完成）；ev.data.tool_name 为工具名 */
@@ -819,6 +832,8 @@ export function subscribeTaskStream(
     const ev = parse(e as MessageEvent);
     const text = ev.data?.text;
     if (text) handlers.onDelta?.(text, ev);
+    const reasoning = ev.data?.reasoning;
+    if (reasoning) handlers.onReasoning?.(reasoning, ev);
     const tc = ev.data?.tool_call;
     if (tc) handlers.onToolCall?.(tc, ev);
   });
