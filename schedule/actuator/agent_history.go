@@ -362,7 +362,8 @@ func buildSegmentedHistory(
 	// 末尾的 assistant」与「后一个 task 开头的 tool」被误判成一对。
 	out := make([]historySegment, 0, len(segs))
 	for i := range segs {
-		segs[i].Messages = sortToolResultsByIndex(dropOrphanToolResults(segs[i].Messages))
+		segs[i].Messages = sortToolResultsByIndex(
+			dropOrphanToolResults(dropOrphanToolCalls(segs[i].Messages)))
 		if len(segs[i].Messages) == 0 {
 			continue // 清理后空段直接丢弃
 		}
@@ -414,7 +415,8 @@ func buildCurrentHistory(
 	// 工具结果老化：长任务里几十条工具结果常驻上下文，只保留最近若干条全文，
 	// 更早的降级为摘要级 / 带取回句柄的占位（见 tool_result_aging.go）。
 	// 放在 dropOrphan 之前：老化只改内容不动角色，配对关系不受影响。
-	return mergeAdjacentUsers(sortToolResultsByIndex(dropOrphanToolResults(ageCurrentToolResults(msgs)))), nil
+	return mergeAdjacentUsers(sortToolResultsByIndex(
+		dropOrphanToolResults(dropOrphanToolCalls(ageCurrentToolResults(msgs))))), nil
 }
 
 // mergeAdjacentUsers 折叠相邻的 user 消息，只保留最后一条。
@@ -768,6 +770,55 @@ func dropOrphanToolResults(messages []llm.Message) []llm.Message {
 			pending = map[string]int{}
 			out = append(out, m)
 		}
+	}
+	return out
+}
+
+// dropOrphanToolCalls 丢弃「后面没有对应 tool 结果」的 assistant tool_calls。
+//
+// 与 dropOrphanToolResults 互为镜像：它处理「孤立的工具结果」，这里处理
+// 「孤立的工具调用」。孤立调用来自——某轮 functional_call 成功发起了工具调用，
+// 但随后的 tool_call turn 失败 / 任务被中途停止，工具结果没有落库；历史里就只剩
+// assistant(tool_calls) 后面直接跟 user / 下一条 assistant。
+//
+// 这类消息发给 OpenAI/Azure 网关会被判「tool_calls 后必须跟对应 tool 结果」
+// 而报错（gpt-5.6-sol 流式下返回 200 + 裸 JSON 错误体，被上层误判成空结果）。
+// 顺手也减少上下文长度。
+func dropOrphanToolCalls(messages []llm.Message) []llm.Message {
+	out := make([]llm.Message, 0, len(messages))
+	for i := 0; i < len(messages); i++ {
+		m := messages[i]
+		if m.Role != llm.RoleAssistant || len(m.ToolCalls) == 0 {
+			out = append(out, m)
+			continue
+		}
+
+		// 紧跟其后的连续 tool 结果段 [i+1, j)，按工具名统计可用结果数
+		j := i + 1
+		avail := map[string]int{}
+		for j < len(messages) && messages[j].Role == llm.RoleTool {
+			avail[messages[j].ToolName]++
+			j++
+		}
+
+		// 只保留有对应 tool 结果的调用，孤立的丢弃
+		kept := make([]llm.ToolCall, 0, len(m.ToolCalls))
+		for _, tc := range m.ToolCalls {
+			if avail[tc.Name] > 0 {
+				avail[tc.Name]--
+				kept = append(kept, tc)
+			}
+		}
+
+		if len(kept) == 0 && strings.TrimSpace(m.Content) == "" {
+			// 整条只剩孤立的 tool_calls 且无正文：丢弃整条，连同它后面
+			// （本就不属于任何存活调用）的 tool 结果段一起跳过。
+			i = j - 1
+			continue
+		}
+
+		m.ToolCalls = kept
+		out = append(out, m)
 	}
 	return out
 }

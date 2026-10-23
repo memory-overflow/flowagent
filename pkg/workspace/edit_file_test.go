@@ -120,3 +120,19 @@ func TestEditFileInsertAppend(t *testing.T) {
 		t.Fatalf("内容不符: %q", got)
 	}
 }
+
+func TestEditFileAbsoluteOutsideWorkspace(t *testing.T) {
+	wc := &Context{WorkspaceDir: t.TempDir()}
+	target := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(target, []byte("before\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := editFileTool().Handler(context.Background(), wc, map[string]interface{}{"command": "str_replace", "path": target, "old_string": "before", "new_string": "after"})
+	if err != nil {
+		t.Fatalf("绝对路径编辑失败: %v", err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != "after\n" {
+		t.Fatalf("绝对路径内容不符: %q err=%v", got, err)
+	}
+}
