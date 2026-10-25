@@ -328,6 +328,23 @@ type ToolCallRecord struct {
 	Summary string `json:"summary,omitempty"`
 }
 
+// MaxToolCallOutputChars tool_call 记录里 Output 字段的最大字符数（按 rune）。
+//
+// read_file / run_command 等工具的输出可能很大（读大文件全文、命令完整 stdout），
+// 全量复制进 task_output.tool_calls 会让工作流的 task_output 膨胀到 MB 级，
+// 拖慢详情接口（DB 读 + JSON 解析）。落库时就截断，从源头控制 task_output 体积。
+// 完整输出仍在 task_turn 表，调试可回查。
+const MaxToolCallOutputChars = 4 * 1024
+
+// TruncateToolCallOutput 截断 tool_call 的输出，超过上限时加标记。
+func TruncateToolCallOutput(s string) string {
+	if n := len([]rune(s)); n > MaxToolCallOutputChars {
+		r := []rune(s)
+		return string(r[:MaxToolCallOutputChars]) + "\n…(输出过大，已截断)…"
+	}
+	return s
+}
+
 // AgentOutput 单 agent 任务输出
 type AgentOutputData struct {
 	ReplyText    string           `json:"reply_text"`

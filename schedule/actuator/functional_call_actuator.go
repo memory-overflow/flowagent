@@ -1130,7 +1130,7 @@ func buildToolCallRecord(t *model.TaskTurn) model.ToolCallRecord {
 	if t.Output != "" {
 		var o model.TurnToolOutput
 		if err := json.Unmarshal([]byte(t.Output), &o); err == nil {
-			rec.Output = o.Content
+			rec.Output = model.TruncateToolCallOutput(o.Content)
 		}
 	}
 	if t.ErrorMsg != "" && rec.Output == "" {

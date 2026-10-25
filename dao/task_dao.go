@@ -426,6 +426,30 @@ func (d *TaskDAO) GetTaskByID(ctx context.Context, taskID string) (*model.Task, 
 	return &task, nil
 }
 
+// GetTaskStatusByID 查询任务但排除 longtext 大字段（task_output / plan /
+// task_input），供详情接口先判断「是否终态、能否命中缓存」。
+//
+// 详情接口对终态任务做缓存，但命中缓存前不能先读完整 task_output ——
+// 那正是要省掉的 MB 级读取。用本方法先拿 status 判断，命中缓存则直接返回，
+// 完全不碰 longtext。
+func (d *TaskDAO) GetTaskStatusByID(ctx context.Context, taskID string) (*model.Task, error) {
+	db := d.getDB().WithContext(ctx)
+
+	var temp model.TaskTemp
+	if err := db.Where("task_id = ?", taskID).First(&temp).Error; err == nil {
+		return &temp.Task, nil
+	}
+	var task model.Task
+	if err := db.Omit("TaskOutput", "Plan", "TaskInput").
+		Where("task_id = ?", taskID).First(&task).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get task status failed: %w", err)
+	}
+	return &task, nil
+}
+
 // ListTasksByChatID 根据对话 ID 查询对话任务列表（双表查询：临时态 + 终态合并）。
 //
 // 只返回 TaskTypeConversation。工作流任务虽然也挂在同一个 chat_id 下，

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +15,51 @@ import (
 	"github.com/memory-overflow/flowagent/model"
 	"github.com/memory-overflow/flowagent/pkg/stream"
 )
+
+// ============================================================
+// 终态任务详情缓存
+// ============================================================
+
+// 终态任务的 task_output / think_process 不再变化，而前端对工作流页做 5s 轮询
+// 详情，每次重复读 DB 里 MB 级 task_output 并解析纯属浪费。只缓存终态任务；
+// running 任务实时变化，不走缓存。
+var (
+	detailCacheMu sync.RWMutex
+	detailCache   = map[string]taskDetailCacheEntry{}
+)
+
+type taskDetailCacheEntry struct {
+	detail   map[string]interface{}
+	cachedAt time.Time
+}
+
+const (
+	detailCacheTTL        = 10 * time.Minute
+	detailCacheMaxEntries = 1024
+)
+
+func getCachedTaskDetail(taskID string) (map[string]interface{}, bool) {
+	detailCacheMu.RLock()
+	e, ok := detailCache[taskID]
+	detailCacheMu.RUnlock()
+	if !ok || time.Since(e.cachedAt) > detailCacheTTL {
+		return nil, false
+	}
+	return e.detail, true
+}
+
+func setCachedTaskDetail(taskID string, detail map[string]interface{}) {
+	detailCacheMu.Lock()
+	defer detailCacheMu.Unlock()
+	if len(detailCache) >= detailCacheMaxEntries {
+		for k, e := range detailCache {
+			if time.Since(e.cachedAt) > detailCacheTTL {
+				delete(detailCache, k)
+			}
+		}
+	}
+	detailCache[taskID] = taskDetailCacheEntry{detail: detail, cachedAt: time.Now()}
+}
 
 // ============================================================
 // 请求结构体
@@ -36,6 +82,16 @@ func GetTaskDetail(ctx *gin.Context, req interface{}) (interface{}, error) {
 	r := req.(*GetTaskDetailRequest)
 
 	taskDAO := &dao.TaskDAO{}
+
+	// 终态任务详情稳定，先查缓存：命中则直接返回，跳过 MB 级 task_output 的
+	// 读取与解析。先用轻量查询拿 status（不读 longtext），避免「为省读取反而
+	// 先读了完整 task_output」。
+	if st, err := taskDAO.GetTaskStatusByID(ctx, r.TaskID); err == nil && st != nil && st.IsTerminal() {
+		if cached, ok := getCachedTaskDetail(r.TaskID); ok {
+			return cached, nil
+		}
+	}
+
 	task, err := taskDAO.GetTaskByID(ctx, r.TaskID)
 	if err != nil {
 		return nil, err
@@ -55,6 +111,11 @@ func GetTaskDetail(ctx *gin.Context, req interface{}) (interface{}, error) {
 				})
 			}
 		}
+	}
+
+	// 终态任务写入缓存，供后续轮询命中
+	if task.IsTerminal() {
+		setCachedTaskDetail(r.TaskID, detail)
 	}
 	return detail, nil
 }

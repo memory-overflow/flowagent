@@ -1187,23 +1187,13 @@ func buildTaskDetailMap(t *model.Task) map[string]interface{} {
 	return result
 }
 
-// maxDetailToolCallOutputChars detail 返回里单条工具调用输出的最大字符数（按 rune）。
-//
-// 历史上 run_command 等工具可能把几百 MB 的日志写进 turn.output，进而被复制进
-// task_output.tool_calls[].output。detail 只做展示，不需要完整结果，这里截断，
-// 避免超大字符串贯穿响应序列化、日志打印与前端渲染。
-const maxDetailToolCallOutputChars = 4 * 1024
-
 // trimDetailToolCallOutputs 截断 agent_output 里工具调用记录的超大输出。
 func trimDetailToolCallOutputs(out *model.AgentOutputData) {
 	if out == nil {
 		return
 	}
 	for i := range out.ToolCalls {
-		if n := len([]rune(out.ToolCalls[i].Output)); n > maxDetailToolCallOutputChars {
-			r := []rune(out.ToolCalls[i].Output)
-			out.ToolCalls[i].Output = string(r[:maxDetailToolCallOutputChars]) + "\n…(输出过大，已截断)…"
-		}
+		out.ToolCalls[i].Output = model.TruncateToolCallOutput(out.ToolCalls[i].Output)
 	}
 }
 

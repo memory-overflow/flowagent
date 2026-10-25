@@ -604,7 +604,7 @@ func buildToolCallRecordForFailed(t *model.TaskTurn) model.ToolCallRecord {
 	if t.Output != "" {
 		var o model.TurnToolOutput
 		if json.Unmarshal([]byte(t.Output), &o) == nil {
-			rec.Output = o.Content
+			rec.Output = model.TruncateToolCallOutput(o.Content)
 		}
 	}
 	if t.ErrorMsg != "" && rec.Output == "" {
