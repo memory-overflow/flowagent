@@ -15,7 +15,8 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import type { ConversationWorkflow, WorkflowNode, TaskStatus } from '../types/api';
+import type { ConversationWorkflow, WorkflowNode, TaskStatus, AgentOutput } from '../types/api';
+import { getWorkflowNodeDetail } from '../services/api';
 import Markdown from './Markdown';
 import ToolCalls from './ToolCalls';
 import { fmtTokens } from './ContextUsage';
@@ -472,15 +473,30 @@ interface WorkflowNodeDetailProps {
 
 export function WorkflowNodeDetail({ node, nodes, onClose, liveThink, workflowTaskId, onRetryNode }: WorkflowNodeDetailProps) {
   const t = useT();
+  // 详情接口已对节点 output 做摘要化（去掉 tool_calls / think 明细），这里点开节点时
+  // 按需拉取完整 output。fullOutput 为 null 表示未拉取或拉取失败（回退摘要）。
+  const [fullOutput, setFullOutput] = useState<AgentOutput | null>(null);
+  const [loadingOutput, setLoadingOutput] = useState(false);
+  useEffect(() => {
+    if (loadingOutput || fullOutput || !node.output || !workflowTaskId) return;
+    // 已有完整明细（tool_calls 或 think_process 非空）→ 无需再拉
+    if (node.output.tool_calls?.length || node.output.think_process?.length) return;
+    setLoadingOutput(true);
+    getWorkflowNodeDetail(workflowTaskId, node.node_id)
+      .then((res) => setFullOutput(res.data.data || node.output || null))
+      .catch(() => setFullOutput(node.output || null))
+      .finally(() => setLoadingOutput(false));
+  }, [node.node_id, workflowTaskId, node.output, loadingOutput, fullOutput]);
+  const output = fullOutput || node.output;
   const durationTip = useDurationTooltip();
   const nameOf = (id: string) => nodes.find((n) => n.node_id === id)?.name || id;
   const deps = node.depends_on || [];
   const dependents = nodes.filter((n) => (n.depends_on || []).includes(node.node_id));
   // 终态思考过程优先（落库最完整）；执行中退回实时重建的步骤
-  const finalThink = node.output?.think_process?.length
-    ? node.output.think_process
+  const finalThink = output?.think_process?.length
+    ? output.think_process
     : liveThink?.[node.node_id] || [];
-  const isLive = finalThink.length > 0 && !node.output?.think_process?.length;
+  const isLive = finalThink.length > 0 && !output?.think_process?.length;
   // 思考过程默认展开 —— 子任务的中间过程正是排查该节点执行情况的关键
   const [showThink, setShowThink] = useState(true);
 
@@ -618,19 +634,19 @@ export function WorkflowNodeDetail({ node, nodes, onClose, liveThink, workflowTa
         )}
       </dl>
 
-      {node.output?.reply_text && (
+      {output?.reply_text && (
         <div className="wf-detail-output">
           <div className="wf-detail-output-label">{t('workflow.output')}</div>
-          <Markdown compact>{node.output.reply_text}</Markdown>
+          <Markdown compact>{output.reply_text}</Markdown>
         </div>
       )}
 
-      {!!node.output?.tool_calls?.length && (
+      {!!output?.tool_calls?.length && (
         <div className="wf-detail-output wf-detail-tool-calls">
           <div className="wf-detail-output-label">
-            {t('workflow.toolCalls', { n: node.output.tool_calls.length })}
+            {t('workflow.toolCalls', { n: output.tool_calls.length })}
           </div>
-          <ToolCalls calls={node.output.tool_calls} />
+          <ToolCalls calls={output.tool_calls} />
         </div>
       )}
 

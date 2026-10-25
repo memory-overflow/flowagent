@@ -89,6 +89,8 @@ func RegisterRoutes(router *gin.RouterGroup) {
 		task.POST("/turns", Wrap(ListTaskTurnsBinder, ListTaskTurns))
 		// 单条 turn 详情：拉完整 input/output（调试页点开某条 turn 时按需拉取）
 		task.POST("/turn-detail", Wrap(GetTurnDetailBinder, GetTurnDetail))
+		// 工作流节点详情：拉单个节点的完整 output（tool_calls / think 明细）
+		task.POST("/node-detail", Wrap(GetWorkflowNodeDetailBinder, GetWorkflowNodeDetail))
 		// 调试页用：按 parent_task_id 拉子任务摘要列表（deep_search / workflow 节点子任务）
 		task.POST("/sub-tasks", Wrap(ListSubTasksBinder, ListSubTasks))
 		// SSE 走 GET（EventSource 只支持 GET），绕过 Wrap 的 JSON 包装

@@ -595,6 +595,56 @@ func GetTurnDetailBinder() interface{} {
 	return &GetTurnDetailRequest{}
 }
 
+// GetWorkflowNodeDetailRequest 工作流节点详情请求
+type GetWorkflowNodeDetailRequest struct {
+	TaskID string `json:"task_id"` // 工作流任务 ID
+	NodeID string `json:"node_id"` // 节点 id
+}
+
+// GetWorkflowNodeDetail 拉取工作流单个节点的完整 output（含 tool_calls / think 明细）。
+// 工作流详情接口已对节点 output 做摘要化（见 summarizeNodeOutputForDetail），
+// 前端节点详情面板点开时经本接口单独拉完整内容。
+func GetWorkflowNodeDetail(ctx *gin.Context, req interface{}) (interface{}, error) {
+	r := req.(*GetWorkflowNodeDetailRequest)
+	if r.TaskID == "" || r.NodeID == "" {
+		return nil, &APIError{Code: http.StatusBadRequest, Msg: "task_id 和 node_id 必填"}
+	}
+
+	taskDAO := &dao.TaskDAO{}
+	task, err := taskDAO.GetTaskByID(ctx, r.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, &APIError{Code: http.StatusNotFound, Msg: "任务不存在"}
+	}
+	if task.TaskType != model.TaskTypeWorkflow {
+		return nil, &APIError{Code: http.StatusBadRequest, Msg: "只能查询工作流任务的节点"}
+	}
+
+	var dag model.WorkflowOutputData
+	if task.TaskOutput != "" {
+		if err := json.Unmarshal([]byte(task.TaskOutput), &dag); err != nil {
+			return nil, &APIError{Code: http.StatusInternalServerError, Msg: "工作流 DAG 解析失败"}
+		}
+	}
+	for _, n := range dag.Nodes {
+		if n.NodeID != r.NodeID {
+			continue
+		}
+		if n.Output != nil {
+			trimDetailToolCallOutputs(n.Output)
+		}
+		return n.Output, nil
+	}
+	return nil, &APIError{Code: http.StatusNotFound, Msg: "节点不存在"}
+}
+
+// GetWorkflowNodeDetailBinder 绑定 GetWorkflowNodeDetail 请求参数
+func GetWorkflowNodeDetailBinder() interface{} {
+	return &GetWorkflowNodeDetailRequest{}
+}
+
 // TurnDebugView 单条 turn 的调试视图（前端友好格式）
 //
 // 相比 DB 里的 TaskTurn，这里把 Input/Output 的 JSON 提前解出来变成 object，

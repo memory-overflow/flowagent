@@ -1177,6 +1177,9 @@ func buildTaskDetailMap(t *model.Task) map[string]interface{} {
 				for i := range wfOut.Nodes {
 					if wfOut.Nodes[i].Output != nil {
 						trimDetailToolCallOutputs(wfOut.Nodes[i].Output)
+						// 详情接口只给节点 reply 与产物摘要，tool_calls / think 明细
+						// 由 GetWorkflowNodeDetail 点开节点时单独拉，避免 DAG 膨胀。
+						summarizeNodeOutputForDetail(wfOut.Nodes[i].Output)
 					}
 				}
 				result["workflow_output"] = wfOut
@@ -1185,6 +1188,18 @@ func buildTaskDetailMap(t *model.Task) map[string]interface{} {
 	}
 
 	return result
+}
+
+// summarizeNodeOutputForDetail 摘要化工作流节点 output：详情接口只保留 reply 与
+// 产物清单，去掉 tool_calls / think_process / think_layers 这些明细大字段。
+// 节点详情页（WorkflowNodeDetail）点开时经 GetWorkflowNodeDetail 单独拉完整。
+func summarizeNodeOutputForDetail(out *model.AgentOutputData) {
+	if out == nil {
+		return
+	}
+	out.ToolCalls = nil
+	out.ThinkProcess = nil
+	out.ThinkLayers = nil
 }
 
 // trimDetailToolCallOutputs 截断 agent_output 里工具调用记录的超大输出。

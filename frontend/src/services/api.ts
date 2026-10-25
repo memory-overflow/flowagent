@@ -17,6 +17,7 @@ import type {
   DBConfigUpdateResult,
   DBTestResult,
   WorkflowListItem,
+  AgentOutput,
 } from '../types/api';
 
 const http = axios.create({
@@ -299,6 +300,14 @@ export function retryTask(taskId: string) {
 /** 重试工作流的单个失败节点及其下游，保留已完成上游 */
 export function retryWorkflowNode(workflowTaskId: string, nodeId: string) {
   return http.post<CommonResponse<null>>('/tasks/retry-node', {
+    task_id: workflowTaskId,
+    node_id: nodeId,
+  });
+}
+
+/** 拉取工作流单个节点的完整 output（tool_calls / think 明细，详情接口已摘要化） */
+export function getWorkflowNodeDetail(workflowTaskId: string, nodeId: string) {
+  return http.post<CommonResponse<AgentOutput | null>>('/tasks/node-detail', {
     task_id: workflowTaskId,
     node_id: nodeId,
   });
