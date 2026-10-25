@@ -879,7 +879,7 @@ func decodeAndValidatePlan(
 	}
 
 	inferMissingDeps(resp, existingWF, target)
-	if err := validatePlanningResp(resp, existingWF, target); err != nil {
+	if err := validatePlanningResp(resp, existingWF, target, wfs); err != nil {
 		return nil, nil, err
 	}
 	return resp, target, nil
@@ -1565,6 +1565,7 @@ func newAnchorError(bad []string, anchors map[string]bool) *replanError {
 // target 为 nil 或 Action=new 时 existing 也是 nil，等价于「首轮规划」校验。
 func validatePlanningResp(
 	r *planningLLMResp, existing *model.WorkflowOutputData, target *planWorkflowTarget,
+	wfs *workflowContext,
 ) error {
 	switch r.Mode {
 	case model.PlanModeSingleAgent:
@@ -1608,7 +1609,7 @@ func validatePlanningResp(
 					return fmt.Errorf("node %s depends on itself", n.NodeID)
 				}
 				if !existingIDs[dep] && !newIDs[dep] {
-					return fmt.Errorf("node %s depends on unknown node %s", n.NodeID, dep)
+					return newUnknownNodeError(n, dep, existing, wfs)
 				}
 			}
 		}
@@ -1651,6 +1652,60 @@ func validatePlanningResp(
 	default:
 		return fmt.Errorf("unknown mode: %q", r.Mode)
 	}
+}
+
+// newUnknownNodeError 生成「依赖了目标工作流内不存在的节点」的明确反馈。
+//
+// 背景：节点 id 是对话内全局连续编号（n1..nN 跨多条工作流），模型很容易
+// 误以为「n9 既然存在就能引用」，实则 append 只能引用目标工作流内的节点。
+// 反馈里明确列出目标工作流的已有节点，并指出被引用节点若属于另一条工作流，
+// 给出其归属，引导模型改成新节点或换目标工作流，而不是反复犯同一个错。
+func newUnknownNodeError(
+	n planningLLMNode, dep string, existing *model.WorkflowOutputData, wfs *workflowContext,
+) *replanError {
+	existingList := sortedNodeIDs(existing)
+	msg := fmt.Sprintf(
+		"node %s 的 depends_on 引用了 %s，但目标工作流里没有这个节点（目标工作流已有节点：%s）。",
+		n.NodeID, dep, strings.Join(existingList, "、"))
+	if other := findWorkflowContainingNode(wfs, dep); other != nil {
+		msg += fmt.Sprintf(
+			"注意：%s 属于另一条工作流「%s」，续接/新建时不能跨工作流引用节点。"+
+				"若确需依赖该步骤，请把它作为本轮新节点提交（用一个不冲突的 node_id），或改为续接到那条工作流。",
+			dep, other.Title)
+	} else {
+		msg += "请把 depends_on 改成目标工作流内已存在的节点，或把该依赖对应的步骤作为本轮新节点一并提交。"
+	}
+	return &replanError{msg: msg}
+}
+
+// sortedNodeIDs 返回工作流内节点 id 的列表（按 DAG 内出现顺序）。
+func sortedNodeIDs(existing *model.WorkflowOutputData) []string {
+	if existing == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(existing.Nodes))
+	for _, n := range existing.Nodes {
+		ids = append(ids, n.NodeID)
+	}
+	return ids
+}
+
+// findWorkflowContainingNode 在对话所有工作流里查找包含指定节点 id 的工作流。
+func findWorkflowContainingNode(wfs *workflowContext, nodeID string) *workflowCandidate {
+	if wfs == nil {
+		return nil
+	}
+	for _, cand := range wfs.Candidates {
+		if cand.DAG == nil {
+			continue
+		}
+		for _, n := range cand.DAG.Nodes {
+			if n.NodeID == nodeID {
+				return cand
+			}
+		}
+	}
+	return nil
 }
 
 // ============================================================
