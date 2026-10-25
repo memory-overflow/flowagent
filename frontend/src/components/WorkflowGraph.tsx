@@ -464,9 +464,13 @@ interface WorkflowNodeDetailProps {
   onClose: () => void;
   /** 运行中子任务的实时思考过程（node_id -> 步骤列表），执行中 node.output 尚未写入时兜底展示 */
   liveThink?: Record<string, string[]>;
+  /** 父工作流任务 ID（单节点重试用） */
+  workflowTaskId?: string;
+  /** 重试单个失败节点的回调（入参为 node_id 或子任务 task_id） */
+  onRetryNode?: (nodeId: string) => void;
 }
 
-export function WorkflowNodeDetail({ node, nodes, onClose, liveThink }: WorkflowNodeDetailProps) {
+export function WorkflowNodeDetail({ node, nodes, onClose, liveThink, workflowTaskId, onRetryNode }: WorkflowNodeDetailProps) {
   const t = useT();
   const durationTip = useDurationTooltip();
   const nameOf = (id: string) => nodes.find((n) => n.node_id === id)?.name || id;
@@ -492,6 +496,16 @@ export function WorkflowNodeDetail({ node, nodes, onClose, liveThink }: Workflow
         >
           {node.archived ? t('status.abandoned') : taskStatusLabel(t, node.status)}
         </span>
+        {!node.archived && (node.status === 4 || node.status === 6) && workflowTaskId && onRetryNode && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => onRetryNode(node.task_id || node.node_id)}
+            title={t('workflow.retryNodeTip')}
+          >
+            {t('workflow.retryNode')}
+          </button>
+        )}
         <button type="button" className="wf-detail-close" onClick={onClose} title={t('common.close')}>
           ×
         </button>

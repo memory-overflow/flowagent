@@ -350,6 +350,84 @@ func RetryTaskBinder() interface{} {
 	return &RetryTaskRequest{}
 }
 
+// RetryWorkflowNodeRequest 单节点重试请求
+type RetryWorkflowNodeRequest struct {
+	TaskID string `json:"task_id"` // 工作流任务 ID
+	NodeID string `json:"node_id"` // 要重试的节点（node_id 或子任务 task_id）
+}
+
+// RetryWorkflowNode 重试工作流里的单个失败节点及其下游，保留已完成的上游。
+//
+// 与 RetryTask（整工作流重试）不同：这里只重置用户指定的节点和它下游的
+// 节点，其他分支（包括不相关的失败节点）保持原样，由用户逐个处理。
+// 「从失败位置开始」的语义：已完成的上游节点不重跑。
+func RetryWorkflowNode(ctx *gin.Context, req interface{}) (interface{}, error) {
+	r := req.(*RetryWorkflowNodeRequest)
+	if r.TaskID == "" || r.NodeID == "" {
+		return nil, &APIError{Code: http.StatusBadRequest, Msg: "task_id 和 node_id 必填"}
+	}
+
+	taskDAO := &dao.TaskDAO{}
+	task, err := taskDAO.GetTaskByID(ctx, r.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, &APIError{Code: http.StatusNotFound, Msg: "任务不存在"}
+	}
+	if task.TaskType != model.TaskTypeWorkflow {
+		return nil, &APIError{Code: http.StatusBadRequest, Msg: "只能重试工作流任务的节点"}
+	}
+
+	// 乐观锁重试（与 RetryTask 同口径，防并发追加节点）
+	const maxRetryAttempts = 3
+	for attempt := 1; ; attempt++ {
+		cur, err := taskDAO.GetTaskByID(ctx, r.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		if cur == nil {
+			return nil, &APIError{Code: http.StatusNotFound, Msg: "任务不存在"}
+		}
+		var dag model.WorkflowOutputData
+		if cur.TaskOutput != "" {
+			if err := json.Unmarshal([]byte(cur.TaskOutput), &dag); err != nil {
+				return nil, &APIError{Code: http.StatusInternalServerError, Msg: "工作流 DAG 解析失败"}
+			}
+		}
+
+		progress, err := resetWorkflowNodeForRetry(&dag, r.NodeID)
+		if err != nil {
+			return nil, &APIError{Code: http.StatusBadRequest, Msg: err.Error()}
+		}
+		outJSON, err := json.Marshal(dag)
+		if err != nil {
+			return nil, err
+		}
+
+		err = taskDAO.RetryWorkflow(ctx, dao.RetryWorkflowParams{
+			TaskID:        r.TaskID,
+			Output:        string(outJSON),
+			Progress:      progress,
+			ExpectVersion: cur.DAGVersion,
+		})
+		if err == nil {
+			return nil, nil
+		}
+		if !errors.Is(err, dao.ErrWorkflowVersionConflict) {
+			return nil, err
+		}
+		if attempt >= maxRetryAttempts {
+			return nil, &APIError{Code: http.StatusConflict, Msg: "工作流正在被并发修改，请稍后重试"}
+		}
+	}
+}
+
+// RetryWorkflowNodeBinder 绑定 RetryWorkflowNode 请求参数
+func RetryWorkflowNodeBinder() interface{} {
+	return &RetryWorkflowNodeRequest{}
+}
+
 // retryConversationTask 重试一个对话任务：从失败发生的 stage 断点续跑。
 //
 // 不再清空旧 turn、也不再重置回规划期 —— 失败时 ActionFailed 已把 stage 保留在
@@ -409,6 +487,68 @@ func resetWorkflowNodesForRetry(dag *model.WorkflowOutputData) float64 {
 		n.Output = nil
 	}
 	return float64(completed) / float64(total) * 100.0
+}
+
+// resetWorkflowNodeForRetry 重置指定节点及其下游（依赖它的节点，含传递依赖），
+// 保留其余节点。返回重算后的进度。
+//
+// 与 resetWorkflowNodesForRetry 的区别：后者是「整工作流重试」——保留全部
+// 已完成节点、重置所有失败/未完成节点；本函数是「单节点重试」——只重置用户
+// 指定的那个节点和它的下游，其他分支（包括不相关的失败节点）保持原样，
+// 由用户逐个处理。「从失败位置开始」的语义由此实现：已完成的上游不重跑。
+func resetWorkflowNodeForRetry(dag *model.WorkflowOutputData, nodeID string) (float64, error) {
+	// 1. 定位目标节点的 NodeID（node_id 或子任务 task_id 均可）
+	targetNodeID := ""
+	for _, n := range dag.Nodes {
+		if n.NodeID == nodeID || n.TaskID == nodeID {
+			targetNodeID = n.NodeID
+			break
+		}
+	}
+	if targetNodeID == "" {
+		return 0, fmt.Errorf("节点不存在: %s", nodeID)
+	}
+
+	// 2. 计算下游集合（直接/间接依赖目标节点的节点），迭代到收敛
+	downstream := map[string]bool{targetNodeID: true}
+	for changed := true; changed; {
+		changed = false
+		for _, n := range dag.Nodes {
+			if downstream[n.NodeID] {
+				continue
+			}
+			for _, dep := range n.DependsOn {
+				if downstream[dep] {
+					downstream[n.NodeID] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+
+	// 3. 重置目标节点 + 下游，保留其余（含已完成上游与其他分支）
+	total := dag.ActiveNodeCount()
+	if total == 0 {
+		return 0, nil
+	}
+	completed := 0
+	for i := range dag.Nodes {
+		n := &dag.Nodes[i]
+		if n.Archived {
+			continue
+		}
+		if downstream[n.NodeID] {
+			n.Status = model.TaskStatusQueued
+			n.TaskID = ""
+			n.Output = nil
+			continue
+		}
+		if n.Status == model.TaskStatusCompleted {
+			completed++
+		}
+	}
+	return float64(completed) / float64(total) * 100.0, nil
 }
 
 // ============================================================

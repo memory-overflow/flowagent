@@ -4,6 +4,7 @@ import {
   getConversationDetail,
   getTaskDetail,
   retryTask,
+  retryWorkflowNode,
   stopTask,
   subscribeTaskStream,
 } from '../services/api';
@@ -38,6 +39,7 @@ export default function WorkflowPage() {
   const [copied, setCopied] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [retryingNode, setRetryingNode] = useState(false);
 
   // 运行中子任务的实时思考过程：node_id -> 步骤列表。
   // 与 node.output.think_process（终态落库）互补 —— 执行中 node.output 尚未写，
@@ -88,6 +90,20 @@ export default function WorkflowPage() {
       alert(t('workflow.stopFailed', { msg: e?.message || t('common.unknown') }));
     } finally {
       setStopping(false);
+    }
+  };
+
+  // 单节点重试：只重试指定失败节点及其下游，保留已完成上游
+  const handleRetryNode = async (nodeId: string) => {
+    if (!workflow?.task_id || retryingNode) return;
+    setRetryingNode(true);
+    try {
+      await retryWorkflowNode(workflow.task_id, nodeId);
+      await fetchWorkflow();
+    } catch (e: any) {
+      alert(t('workflow.retryNodeFailed', { msg: e?.message || t('common.unknown') }));
+    } finally {
+      setRetryingNode(false);
     }
   };
 
@@ -378,6 +394,8 @@ export default function WorkflowPage() {
                     node={selected}
                     nodes={nodes}
                     liveThink={liveThink}
+                    workflowTaskId={workflow?.task_id}
+                    onRetryNode={handleRetryNode}
                     onClose={() => setSelectedId(null)}
                   />
                 </aside>

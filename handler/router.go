@@ -84,6 +84,8 @@ func RegisterRoutes(router *gin.RouterGroup) {
 		task.POST("/detail", Wrap(GetTaskDetailBinder, GetTaskDetail))
 		task.POST("/stop", Wrap(StopTaskBinder, StopTask))
 		task.POST("/retry", Wrap(RetryTaskBinder, RetryTask))
+		// 单节点重试：重置指定节点及其下游，保留已完成上游
+		task.POST("/retry-node", Wrap(RetryWorkflowNodeBinder, RetryWorkflowNode))
 		task.POST("/turns", Wrap(ListTaskTurnsBinder, ListTaskTurns))
 		// 调试页用：按 parent_task_id 拉子任务摘要列表（deep_search / workflow 节点子任务）
 		task.POST("/sub-tasks", Wrap(ListSubTasksBinder, ListSubTasks))

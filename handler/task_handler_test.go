@@ -64,3 +64,49 @@ func TestResetWorkflowNodesForRetry_AllArchived(t *testing.T) {
 		t.Errorf("progress = %v, want 0", got)
 	}
 }
+
+// TestResetWorkflowNodeForRetry 单节点重试：只重置指定节点及其下游，
+// 保留已完成的上游与不相关的失败分支。
+func TestResetWorkflowNodeForRetry(t *testing.T) {
+	dag := &model.WorkflowOutputData{Nodes: []model.WorkflowNodeData{
+		{NodeID: "n1", Status: model.TaskStatusCompleted, TaskID: "sub-1"},
+		{NodeID: "n2", Status: model.TaskStatusFailed, TaskID: "sub-2", DependsOn: []string{"n1"}},
+		{NodeID: "n3", Status: model.TaskStatusFailed, TaskID: "sub-3", DependsOn: []string{"n2"}},
+		// 另一条不相关分支的失败节点，单节点重试 n2 不应碰它
+		{NodeID: "n4", Status: model.TaskStatusFailed, TaskID: "sub-4", DependsOn: []string{"n1"}},
+	}}
+
+	progress, err := resetWorkflowNodeForRetry(dag, "n2")
+	if err != nil {
+		t.Fatalf("reset node failed: %v", err)
+	}
+	// 活跃节点 n1..n4；重试后 n1 保留 completed，n4 保留 failed，n2/n3 重置
+	// completed = 1（n1），total = 4 → 25
+	if progress != 25 {
+		t.Errorf("progress = %v, want 25", progress)
+	}
+	if dag.Nodes[0].Status != model.TaskStatusCompleted || dag.Nodes[0].TaskID != "sub-1" {
+		t.Errorf("upstream completed node must be kept, got %+v", dag.Nodes[0])
+	}
+	if dag.Nodes[1].Status != model.TaskStatusQueued || dag.Nodes[1].TaskID != "" {
+		t.Errorf("target node must be reset, got %+v", dag.Nodes[1])
+	}
+	if dag.Nodes[2].Status != model.TaskStatusQueued || dag.Nodes[2].TaskID != "" {
+		t.Errorf("downstream node must be reset, got %+v", dag.Nodes[2])
+	}
+	if dag.Nodes[3].Status != model.TaskStatusFailed || dag.Nodes[3].TaskID != "sub-4" {
+		t.Errorf("unrelated failed node must be kept, got %+v", dag.Nodes[3])
+	}
+
+	// 用子任务 task_id 定位目标节点也应生效
+	dag2 := &model.WorkflowOutputData{Nodes: []model.WorkflowNodeData{
+		{NodeID: "n1", Status: model.TaskStatusFailed, TaskID: "sub-1"},
+	}}
+	if _, err := resetWorkflowNodeForRetry(dag2, "sub-1"); err != nil {
+		t.Errorf("retry by task_id should work, got %v", err)
+	}
+	// 不存在的节点报错
+	if _, err := resetWorkflowNodeForRetry(dag2, "nope"); err == nil {
+		t.Error("unknown node should error")
+	}
+}

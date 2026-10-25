@@ -296,6 +296,14 @@ export function retryTask(taskId: string) {
   return http.post<CommonResponse<null>>('/tasks/retry', { task_id: taskId });
 }
 
+/** 重试工作流的单个失败节点及其下游，保留已完成上游 */
+export function retryWorkflowNode(workflowTaskId: string, nodeId: string) {
+  return http.post<CommonResponse<null>>('/tasks/retry-node', {
+    task_id: workflowTaskId,
+    node_id: nodeId,
+  });
+}
+
 // ============================================================
 // 调试相关：拉取任务的所有 turn
 // ============================================================
