@@ -565,6 +565,36 @@ func ListTaskTurnsBinder() interface{} {
 	return &ListTaskTurnsRequest{}
 }
 
+// GetTurnDetailRequest 单条 turn 详情请求
+type GetTurnDetailRequest struct {
+	TaskID  string `json:"task_id"`
+	TurnSeq int32  `json:"turn_seq"`
+}
+
+// GetTurnDetail 拉取单条 turn 的完整内容（含 input/output 大字段）。
+// 调试页默认只加载 turn 元信息列表，点开某条 turn 时再调本接口拉完整 payload，
+// 避免列表一次传输 MB 级历史（每条 turn 的 input 都含完整 system prompt + 历史）。
+func GetTurnDetail(ctx *gin.Context, req interface{}) (interface{}, error) {
+	r := req.(*GetTurnDetailRequest)
+	if r.TaskID == "" {
+		return nil, &APIError{Code: http.StatusBadRequest, Msg: "task_id 必填"}
+	}
+	turnDAO := &dao.TaskTurnDAO{}
+	turn, err := turnDAO.GetTurnBySeq(ctx, r.TaskID, r.TurnSeq)
+	if err != nil {
+		return nil, err
+	}
+	if turn == nil {
+		return nil, &APIError{Code: http.StatusNotFound, Msg: "turn 不存在"}
+	}
+	return buildTurnDebugView(turn, "", true), nil
+}
+
+// GetTurnDetailBinder 绑定 GetTurnDetail 请求参数
+func GetTurnDetailBinder() interface{} {
+	return &GetTurnDetailRequest{}
+}
+
 // TurnDebugView 单条 turn 的调试视图（前端友好格式）
 //
 // 相比 DB 里的 TaskTurn，这里把 Input/Output 的 JSON 提前解出来变成 object，
@@ -638,7 +668,9 @@ func buildTaskTurnsSnapshot(ctx context.Context, taskID string) (gin.H, error) {
 	}
 
 	turnDAO := &dao.TaskTurnDAO{}
-	turns, err := turnDAO.ListTurnsByTaskID(ctx, taskID)
+	// 列表视图用轻量查询：不加载 input/output 大字段，避免一次拉 MB 级历史。
+	// 完整 payload 由 GetTurnDetail 按需拉取。
+	turns, err := turnDAO.ListTurnsByTaskIDLight(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -671,7 +703,7 @@ func buildTaskTurnsSnapshot(ctx context.Context, taskID string) (gin.H, error) {
 
 	views := make([]*TurnDebugView, 0, len(turns))
 	for _, t := range turns {
-		views = append(views, buildTurnDebugView(t, turnToSubTask[t.ID]))
+		views = append(views, buildTurnDebugView(t, turnToSubTask[t.ID], false))
 	}
 
 	// 任务摘要：抽到 buildTaskDebugSummary 里供 ListSubTasks 复用
@@ -828,7 +860,7 @@ func ListSubTasks(ctx *gin.Context, req interface{}) (interface{}, error) {
 	}, nil
 }
 
-func buildTurnDebugView(t *model.TaskTurn, subTaskID string) *TurnDebugView {
+func buildTurnDebugView(t *model.TaskTurn, subTaskID string, includePayload bool) *TurnDebugView {
 	v := &TurnDebugView{
 		ID:               t.ID,
 		TaskID:           t.TaskID,
@@ -853,13 +885,18 @@ func buildTurnDebugView(t *model.TaskTurn, subTaskID string) *TurnDebugView {
 		ErrorMsg:         t.ErrorMsg,
 		StartTs:          t.StartTime.UnixMilli(),
 		TimeCostMs:       t.TimeCostMs,
-		InputRaw:         t.Input,
-		OutputRaw:        t.Output,
 		SubTaskID:        subTaskID,
 	}
 	if t.EndTime != nil {
 		v.EndTs = t.EndTime.UnixMilli()
 	}
+	// 列表视图不加载 payload（input/output 大字段），只返回元信息；
+	// 完整 payload 由 GetTurnDetail 按需拉取，避免调试页一次传输 MB 级历史。
+	if !includePayload {
+		return v
+	}
+	v.InputRaw = t.Input
+	v.OutputRaw = t.Output
 	// 尝试把 JSON 解开，方便前端直接渲染
 	if t.Input != "" {
 		var obj interface{}

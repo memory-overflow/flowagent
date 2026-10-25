@@ -308,6 +308,14 @@ export function retryWorkflowNode(workflowTaskId: string, nodeId: string) {
 // 调试相关：拉取任务的所有 turn
 // ============================================================
 
+/** 单条 turn 的完整内容（含 input/output 大字段），调试页点开某条 turn 时按需拉取 */
+export function getTurnDetail(taskId: string, turnSeq: number) {
+  return http.post<CommonResponse<TurnDebugView>>('/tasks/turn-detail', {
+    task_id: taskId,
+    turn_seq: turnSeq,
+  });
+}
+
 /** 单条 turn 的调试视图 —— 与后端 TurnDebugView 对应 */
 export interface TurnDebugView {
   id: number;

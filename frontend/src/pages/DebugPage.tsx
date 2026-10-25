@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { listTaskTurns, subscribeTaskStream } from '../services/api';
+import { listTaskTurns, getTurnDetail, subscribeTaskStream } from '../services/api';
 import type { TurnDebugView, TaskDebugSummary, SubTaskSummary } from '../services/api';
 import { useBlockMeta } from '../components/ContextUsage';
 import type { ContextBlocksView } from '../components/ContextUsage';
@@ -462,6 +462,23 @@ function TurnCard({ turn, open, onToggle, streamText, streamReasoning, streamToo
   streamToolCalls?: Record<number, ToolCallAcc>;
 }) {
   const t = useT();
+  // 列表接口不返回 input/output 大字段，展开时按需拉取单条 turn 完整 payload。
+  // detailTried 防止拉取失败后 useEffect 反复重试造成死循环。
+  const [detail, setDetail] = useState<TurnDebugView | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailTried, setDetailTried] = useState(false);
+  useEffect(() => {
+    if (!open || turn.input_raw !== undefined || detail || detailLoading || detailTried) return;
+    setDetailLoading(true);
+    getTurnDetail(turn.task_id, turn.turn_seq)
+      .then((res) => setDetail(res.data.data))
+      .catch(() => setDetail(null))
+      .finally(() => {
+        setDetailLoading(false);
+        setDetailTried(true);
+      });
+  }, [open, turn.input_raw, turn.task_id, turn.turn_seq, detail, detailLoading, detailTried]);
+  const payload = detail || turn;
   const color = TURN_TYPE_COLOR[turn.turn_type_name] || '#5b8def';
   const statusColor = STATUS_COLOR[turn.status_name] || '#888';
   const phaseColor = PHASE_COLOR[turn.phase] || '#888';
@@ -556,14 +573,14 @@ function TurnCard({ turn, open, onToggle, streamText, streamReasoning, streamToo
 
           {/* LLM 调用的输入分块占比：system / tools / 各历史段各占多少，
               一眼看出「这轮上下文被什么撑大了」 */}
-          {turn.turn_type_name === 'functional_call' && turnCtxBlocks(turn) && (
+          {turn.turn_type_name === 'functional_call' && turnCtxBlocks(payload) && (
             <ContextBlocksBlock
-              blocks={turnCtxBlocks(turn)!}
+              blocks={turnCtxBlocks(payload)!}
               promptTokens={turn.prompt_tokens}
             />
           )}
 
-          <RawBlock label="INPUT" raw={turn.input_raw} color="#5b8def" />
+          <RawBlock label="INPUT" raw={payload.input_raw} color="#5b8def" />
 
           {/* 模型正在流式输出时，实时展示已累积的文本。没有内容时给占位，
               方便判断「卡死」（占位迟迟不变）还是「输出慢」（文本持续增长）。 */}
@@ -608,7 +625,7 @@ function TurnCard({ turn, open, onToggle, streamText, streamReasoning, streamToo
             </div>
           )}
 
-          <RawBlock label="OUTPUT" raw={turn.output_raw} color="#10b981" />
+          <RawBlock label="OUTPUT" raw={payload.output_raw} color="#10b981" />
         </>
       )}
     </div>

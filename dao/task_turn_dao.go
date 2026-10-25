@@ -347,6 +347,35 @@ func (d *TaskTurnDAO) ListTurnsByTaskIDForThink(ctx context.Context, taskID stri
 	return model.NormalizeTurns(turns), nil
 }
 
+// ListTurnsByTaskIDLight 返回任务的 turn 列表，但不加载 input/output 大字段。
+//
+// 供 /tasks/turns 调试列表接口使用：列表只展示元信息（turn 序号、工具名、耗时、
+// token 等），完整 input/output 由用户点开某条 turn 时经 GetTurnBySeq 单独拉。
+// 与 ListTurnsByTaskIDForThink 不同：后者只为 think_process 服务，这里面向调试页。
+func (d *TaskTurnDAO) ListTurnsByTaskIDLight(ctx context.Context, taskID string) ([]*model.TaskTurn, error) {
+	db := d.getDB().WithContext(ctx)
+	var turns []*model.TaskTurn
+	if err := db.Omit("Input", "Output").
+		Where("task_id = ?", taskID).
+		Order("turn_seq ASC").Find(&turns).Error; err != nil {
+		return nil, fmt.Errorf("list turns by task_id (light): %w", err)
+	}
+	return model.NormalizeTurns(turns), nil
+}
+
+// GetTurnBySeq 加载单条 turn 的完整内容（含 input/output 大字段）。
+func (d *TaskTurnDAO) GetTurnBySeq(ctx context.Context, taskID string, turnSeq int32) (*model.TaskTurn, error) {
+	db := d.getDB().WithContext(ctx)
+	var turn model.TaskTurn
+	if err := db.Where("task_id = ? AND turn_seq = ?", taskID, turnSeq).First(&turn).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get turn by seq: %w", err)
+	}
+	return &turn, nil
+}
+
 // ListTurnsByChatID 按对话维度返回所有 turn（用于对话级回溯）
 func (d *TaskTurnDAO) ListTurnsByChatID(ctx context.Context, chatID string) ([]*model.TaskTurn, error) {
 	db := d.getDB().WithContext(ctx)
