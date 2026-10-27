@@ -1366,6 +1366,7 @@ func finishPlanningTurn(
 		TotalTokens:      result.Usage.TotalTokens,
 		PromptTokens:     result.Usage.PromptTokens,
 		CompletionTokens: result.Usage.CompletionTokens,
+		FirstTokenMs:     result.FirstTokenMs,
 	}); err != nil {
 		log.Printf("[func-call-actuator][%s] finish planning turn %d error: %v", temp.TaskID, turnID, err)
 	}

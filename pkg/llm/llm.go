@@ -155,6 +155,9 @@ type ChatResult struct {
 	Reasoning string
 	// Usage token 消耗。provider 不支持时为零值。
 	Usage Usage
+	// FirstTokenMs 首 token 耗时（毫秒）：从发起请求到收到首个有内容的增量。
+	// 仅流式 provider 记录；非流式（聚合返回）或无内容输出时为 0。
+	FirstTokenMs int64
 }
 
 // Client LLM 客户端接口。所有 provider 必须实现。

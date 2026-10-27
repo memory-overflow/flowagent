@@ -477,10 +477,16 @@ export function WorkflowNodeDetail({ node, nodes, onClose, liveThink, workflowTa
   // 按需拉取完整 output。fullOutput 为 null 表示未拉取或拉取失败（回退摘要）。
   const [fullOutput, setFullOutput] = useState<AgentOutput | null>(null);
   const [loadingOutput, setLoadingOutput] = useState(false);
+  // 同步防重复标记：React.StrictMode 开发模式下 effect 会 double-invoke，而
+  // setLoadingOutput(true) 在第二次 effect 执行前尚未 flush，loadingOutput 守卫
+  // 会失效导致 node-detail 被重复请求。ref 是同步的，首次请求发出即置位，
+  // 第二次 effect 命中直接 return。组件按 key=node_id 挂载，切节点即重置。
+  const requestedRef = useRef(false);
   useEffect(() => {
-    if (loadingOutput || fullOutput || !node.output || !workflowTaskId) return;
+    if (requestedRef.current || loadingOutput || fullOutput || !node.output || !workflowTaskId) return;
     // 已有完整明细（tool_calls 或 think_process 非空）→ 无需再拉
     if (node.output.tool_calls?.length || node.output.think_process?.length) return;
+    requestedRef.current = true;
     setLoadingOutput(true);
     getWorkflowNodeDetail(workflowTaskId, node.node_id)
       .then((res) => setFullOutput(res.data.data || node.output || null))

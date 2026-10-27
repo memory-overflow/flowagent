@@ -155,7 +155,7 @@ func runDeepSearch(
 func findPendingDeepSearchSubTask(
 	ctx context.Context, taskDAO *dao.TaskDAO, parentTaskID string, query string,
 ) (*model.Task, error) {
-	subs, err := taskDAO.ListSubTasksByParent(ctx, parentTaskID)
+	subs, err := taskDAO.ListSubTasksByParentLight(ctx, parentTaskID)
 	if err != nil {
 		return nil, fmt.Errorf("deep_search: list subtasks: %w", err)
 	}

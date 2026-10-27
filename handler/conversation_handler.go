@@ -99,6 +99,10 @@ type ListConversationsResponse struct {
 // --- 对话详情 ---
 type GetConversationDetailRequest struct {
 	ChatID string `json:"chat_id"`
+	// Brief 轮询模式：只返回 chat_info（含工作流摘要），跳过对话任务详情渲染。
+	// 供工作流页/对话页的工作流状态轮询使用 —— 轮询只需工作流状态与节点进度，
+	// 对话任务的 think 重建与 token 统计是高频重活，跳过能显著降载。
+	Brief bool `json:"brief,omitempty"`
 }
 
 // --- 删除对话 ---
@@ -424,24 +428,47 @@ func GetConversationDetail(ctx *gin.Context, req interface{}) (interface{}, erro
 		return nil, &APIError{Code: http.StatusNotFound, Msg: "对话不存在"}
 	}
 
-	// 获取任务列表（只含对话任务；绑定的工作流单独返回）
+	// 工作流全集：brief 与完整模式都需要（workflow_list / workflow 面板数据源）。
 	taskDAO := &dao.TaskDAO{}
-	tasks, err := taskDAO.ListTasksByChatID(ctx, r.ChatID)
-	if err != nil {
-		return nil, err
-	}
-
-	// 提前加载工作流全集：给对话任务注入其绑定工作流的执行状态与结果
-	// （见 enrichBoundWorkflow）。放在任务详情循环之前，避免逐任务二次查询。
 	wfs, err := taskDAO.ListWorkflowTasksByChatID(ctx, r.ChatID)
 	if err != nil {
 		return nil, err
 	}
-	wfByID := make(map[string]*boundWorkflowSnapshot, len(wfs))
-	for _, wf := range wfs {
-		wfByID[wf.TaskID] = &boundWorkflowSnapshot{
-			dag:    decodeWorkflowOutput(wf),
-			status: wf.Status,
+
+	// 对话任务详情只在完整模式渲染。brief（轮询）模式跳过：轮询只需工作流
+	// 状态与节点进度，对话任务的 think 重建（enrichThinkProcess 查 turn 表）是
+	// 高频重活，跳过能显著降载。
+	//
+	// token 索引则两种模式都构建 —— 它是一次 GROUP BY（轻量），工作流节点的
+	// token 消耗靠它展示，跳过会让 DAG 面板 token 在轮询期间闪成 0。
+	tokenIdx := dao.BuildChatTokenIndex(ctx, r.ChatID)
+
+	var tasks []*model.Task
+	taskDetails := make([]map[string]interface{}, 0)
+	if !r.Brief {
+		tasks, err = taskDAO.ListTasksByChatID(ctx, r.ChatID)
+		if err != nil {
+			return nil, err
+		}
+
+		// 提前加载工作流全集：给对话任务注入其绑定工作流的执行状态与结果
+		// （见 enrichBoundWorkflow）。放在任务详情循环之前，避免逐任务二次查询。
+		wfByID := make(map[string]*boundWorkflowSnapshot, len(wfs))
+		for _, wf := range wfs {
+			wfByID[wf.TaskID] = &boundWorkflowSnapshot{
+				dag:    decodeWorkflowOutput(wf),
+				status: wf.Status,
+			}
+		}
+
+		turnDAO := &dao.TaskTurnDAO{}
+		taskDetails = make([]map[string]interface{}, 0, len(tasks))
+		for _, t := range tasks {
+			d := buildTaskDetailMap(t)
+			attachTokenStats(d, tokenIdx, t.TaskID)
+			enrichThinkProcess(ctx, turnDAO, t, d)
+			enrichBoundWorkflow(d, wfByID)
+			taskDetails = append(taskDetails, d)
 		}
 	}
 
@@ -461,20 +488,6 @@ func GetConversationDetail(ctx *gin.Context, req interface{}) (interface{}, erro
 	skillNameMap := make(map[string]string, len(skills))
 	for _, s := range skills {
 		skillNameMap[s.ID] = s.Name
-	}
-
-	// 构建任务详情列表
-	turnDAO := &dao.TaskTurnDAO{}
-	// token 索引一次性建好：本接口被前端 5s 轮询且要渲染每个任务，
-	// 逐任务查会变成 O(任务数 × 子任务数) 次 SQL。
-	tokenIdx := dao.BuildChatTokenIndex(ctx, r.ChatID)
-	taskDetails := make([]map[string]interface{}, 0, len(tasks))
-	for _, t := range tasks {
-		d := buildTaskDetailMap(t)
-		attachTokenStats(d, tokenIdx, t.TaskID)
-		enrichThinkProcess(ctx, turnDAO, t, d)
-		enrichBoundWorkflow(d, wfByID)
-		taskDetails = append(taskDetails, d)
 	}
 
 	mcpServers := make([]ConversationMCPServerInfo, 0)
@@ -558,6 +571,15 @@ func loadBoundWorkflow(
 	title := dag.Title
 	if title == "" {
 		title = task.Title
+	}
+
+	// DAG 面板只展示节点摘要（name/description/status），完整 output（tool_calls /
+	// think 明细）由 GetWorkflowNodeDetail 点开节点时单独拉。这里与 buildTaskDetailMap
+	// 一致，先摘要化节点 output，避免每次轮询 DAG 都带上 MB 级明细字段。
+	for i := range dag.Nodes {
+		if dag.Nodes[i].Output != nil {
+			summarizeNodeOutputForDetail(dag.Nodes[i].Output)
+		}
 	}
 
 	// 节点带上各自的 token 消耗与执行时长，同时算出整条工作流的合计

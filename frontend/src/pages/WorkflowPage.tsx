@@ -147,10 +147,10 @@ export default function WorkflowPage() {
     };
   }, [resizing]);
 
-  const fetchWorkflow = useCallback(async () => {
+  const fetchWorkflow = useCallback(async (brief = false) => {
     if (!chatId) return;
     try {
-      const res = await getConversationDetail(chatId);
+      const res = await getConversationDetail(chatId, brief);
       const info = res.data.data.chat_info;
       setChatTitle(info.title || t('workflow.untitledChat'));
       setWorkflow(info.workflow || null);
@@ -180,12 +180,13 @@ export default function WorkflowPage() {
   }, []);
 
   // 工作流处于排队(1)或执行中(2)时周期性刷新，让画布节点状态与整体进度实时更新。
+  // 轮询走 brief 模式：只需节点状态/进度，跳过对话任务详情渲染。
   const workflowActive =
     workflow?.task_status === 1 || workflow?.task_status === 2;
   useEffect(() => {
     if (!workflowActive) return;
     const interval = setInterval(() => {
-      fetchWorkflow();
+      fetchWorkflow(true);
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [workflowActive, fetchWorkflow]);
@@ -327,7 +328,7 @@ export default function WorkflowPage() {
               {retrying ? t('workflow.retrying') : t('common.retry')}
             </button>
           )}
-          <button className="btn btn-ghost btn-sm" onClick={fetchWorkflow}>
+          <button className="btn btn-ghost btn-sm" onClick={() => fetchWorkflow()}>
             {t('common.refresh')}
           </button>
         </div>

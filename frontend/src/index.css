@@ -409,7 +409,8 @@ a:hover { color: var(--accent-hover); }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
+  /* 右侧给全局偏好控件（语言/主题）预留空间，避免遮挡模型选择器等操作 */
+  padding: 0 180px 0 20px;
   min-height: var(--header-h);
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
@@ -1503,6 +1504,27 @@ a:hover { color: var(--accent-hover); }
   display: block;
 }
 
+/* 图片缩略图 hover 时的悬浮放大预览：跟随鼠标，移开即消失 */
+.file-hover-preview {
+  position: fixed;
+  z-index: 2000;
+  pointer-events: none;
+  max-width: 420px;
+  max-height: 340px;
+  padding: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.file-hover-preview img {
+  display: block;
+  max-width: 408px;
+  max-height: 326px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+}
+
 .file-card-meta {
   flex: 1;
   min-width: 0;
@@ -1780,6 +1802,38 @@ a:hover { color: var(--accent-hover); }
 }
 
 .pending-file-icon { font-size: 12px; line-height: 1; flex-shrink: 0; }
+
+.pending-file-thumb {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-secondary);
+  display: inline-block;
+  /* 留出 1px 透明边，hover 时换成强调色而不引起布局抖动 */
+  outline: 1px solid transparent;
+  outline-offset: 0;
+}
+.pending-file-thumb.is-clickable { cursor: zoom-in; }
+.pending-file-thumb.is-clickable:hover,
+.pending-file-thumb.is-clickable:focus-visible {
+  outline-color: var(--accent);
+}
+.pending-file-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+/* 带缩略图的附件 pill 稍微加高，避免 28px 缩略图把圆角胶囊撑得局促 */
+.pending-file-pill:has(.pending-file-thumb) {
+  padding: 3px 8px 3px 4px;
+  border-radius: 14px;
+}
 
 .pending-file-name {
   white-space: nowrap;
@@ -2334,7 +2388,8 @@ a:hover { color: var(--accent-hover); }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
+  /* 右侧给全局偏好控件（语言/主题）预留空间，避免遮挡停止/重试/刷新按钮 */
+  padding: 0 180px 0 20px;
   min-height: var(--header-h);
   border-bottom: 1px solid var(--border);
   background: var(--bg-secondary);
@@ -3072,6 +3127,8 @@ a:hover { color: var(--accent-hover); }
   align-items: center;
   justify-content: space-between;
   margin-bottom: 20px;
+  /* 右侧给全局偏好控件（语言/主题）预留空间，避免遮挡「新建/导入」等操作 */
+  padding-right: 150px;
 }
 
 .page-header h2 {
@@ -3682,4 +3739,93 @@ code {
   font-size: 12px;
   color: var(--text-muted);
   line-height: 1.6;
+}
+
+/* ============================================================
+   右上角偏好控件（语言 + 亮暗主题）
+   ------------------------------------------------------------
+   固定视口右上角，全局可见。两个下拉都用 CSS 变量适配深浅主题。
+   ============================================================ */
+.pref-controls {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 1000;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.pref-dropdown {
+  position: relative;
+}
+
+.pref-trigger {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.pref-trigger:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-light);
+}
+
+.pref-emoji {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.pref-label {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.pref-caret {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.pref-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 124px;
+  padding: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  z-index: 1001;
+}
+
+.pref-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.pref-item:hover {
+  background: var(--bg-hover);
+}
+
+.pref-item.active {
+  color: var(--accent);
+  background: var(--accent-bg);
 }

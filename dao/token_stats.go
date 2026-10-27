@@ -86,7 +86,7 @@ func SumTaskTokensTree(
 	for depth := 0; depth < maxSubTaskDepth && len(level) > 0; depth++ {
 		var next []string
 		for _, parentID := range level {
-			subs, err := taskDAO.ListSubTasksByParent(ctx, parentID)
+			subs, err := taskDAO.ListSubTasksByParentLight(ctx, parentID)
 			if err != nil {
 				// 降级：少算子任务这一层，父任务自身消耗仍然可用
 				continue

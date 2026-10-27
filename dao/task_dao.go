@@ -450,6 +450,40 @@ func (d *TaskDAO) GetTaskStatusByID(ctx context.Context, taskID string) (*model.
 	return &task, nil
 }
 
+// GetTaskStatusBatch 批量查询任务状态（双表合并：临时态优先），只投影轻量列、
+// 不读 task_output / plan / task_input 三个大字段。供前端轮询判断「哪些任务已
+// 终态」使用，替代逐个 GetTaskDetail 拉完整详情 —— 一次请求查完一批任务。
+func (d *TaskDAO) GetTaskStatusBatch(ctx context.Context, taskIDs []string) ([]*model.Task, error) {
+	if len(taskIDs) == 0 {
+		return nil, nil
+	}
+	db := d.getDB().WithContext(ctx)
+
+	var temps []model.TaskTemp
+	if err := db.Omit("TaskOutput", "Plan", "TaskInput").
+		Where("task_id IN ?", taskIDs).Find(&temps).Error; err != nil {
+		return nil, fmt.Errorf("batch temp task status: %w", err)
+	}
+	var finals []*model.Task
+	if err := db.Omit("TaskOutput", "Plan", "TaskInput").
+		Where("task_id IN ?", taskIDs).Find(&finals).Error; err != nil {
+		return nil, fmt.Errorf("batch task status: %w", err)
+	}
+
+	seen := make(map[string]bool, len(temps))
+	result := make([]*model.Task, 0, len(temps)+len(finals))
+	for i := range temps {
+		seen[temps[i].TaskID] = true
+		result = append(result, &temps[i].Task)
+	}
+	for _, t := range finals {
+		if !seen[t.TaskID] {
+			result = append(result, t)
+		}
+	}
+	return result, nil
+}
+
 // ListTasksByChatID 根据对话 ID 查询对话任务列表（双表查询：临时态 + 终态合并）。
 //
 // 只返回 TaskTypeConversation。工作流任务虽然也挂在同一个 chat_id 下，
@@ -695,6 +729,45 @@ func (d *TaskDAO) ListSubTasksByParent(ctx context.Context, parentTaskID string)
 	return result, nil
 }
 
+// ListSubTasksByParentLight 与 ListSubTasksByParent 同义，但不加载 task_output / plan
+// 两个 longtext 大字段。子任务的 task_output 是节点完整输出（含 tool_calls /
+// think 明细），而多数调用方（调试页列表、token 递归聚合、停止级联、deep_search
+// 复用判重）只需 status / task_id / task_input 等轻字段 —— 全量加载会一次多读
+// MB 级数据，且本方法按 parent_task_id 查询（走 parent_created 索引）。
+//
+// 需要完整 output 的调用方（workflow_actuator 回填节点输出、planning_phase
+// 收集产物/调研摘要）仍走 ListSubTasksByParent。
+func (d *TaskDAO) ListSubTasksByParentLight(ctx context.Context, parentTaskID string) ([]*model.Task, error) {
+	db := d.getDB().WithContext(ctx)
+
+	var temps []model.TaskTemp
+	if err := db.Omit("TaskOutput", "Plan").
+		Where("parent_task_id = ?", parentTaskID).
+		Order("created_time ASC").Find(&temps).Error; err != nil {
+		return nil, fmt.Errorf("list temp subtasks (light): %w", err)
+	}
+
+	var finals []*model.Task
+	if err := db.Omit("TaskOutput", "Plan").
+		Where("parent_task_id = ?", parentTaskID).
+		Order("created_time ASC").Find(&finals).Error; err != nil {
+		return nil, fmt.Errorf("list final subtasks (light): %w", err)
+	}
+
+	seen := make(map[string]bool, len(temps)+len(finals))
+	result := make([]*model.Task, 0, len(temps)+len(finals))
+	for i := range temps {
+		seen[temps[i].TaskID] = true
+		result = append(result, &temps[i].Task)
+	}
+	for _, t := range finals {
+		if !seen[t.TaskID] {
+			result = append(result, t)
+		}
+	}
+	return result, nil
+}
+
 // TaskTimeRange 任务生命周期的时间快照。
 //
 // 只取时间与状态列：工作流详情要一次性给所有节点算执行时长，把
@@ -766,7 +839,7 @@ func IsTerminalStatus(s model.TaskStatus) bool { return isTerminalStatus(s) }
 func (d *TaskDAO) ListActiveDescendants(ctx context.Context, rootTaskID string) ([]*model.Task, error) {
 	return collectActiveDescendants(
 		func(parentID string) ([]*model.Task, error) {
-			return d.ListSubTasksByParent(ctx, parentID)
+			return d.ListSubTasksByParentLight(ctx, parentID)
 		},
 		rootTaskID,
 	)

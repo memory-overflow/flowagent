@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTickingElapsed, formatElapsedMs } from '../hooks/useTickingElapsed';
 import {
@@ -6,6 +6,7 @@ import {
   sendMessage,
   uploadFile,
   getTaskDetail,
+  getTasksStatus,
   retryTask,
   stopTask,
   addConversationMCP,
@@ -37,7 +38,9 @@ import type {
   ModelConfig,
 } from '../types/api';
 import { TaskStatus } from '../types/api';
+import type { TaskStatusItem } from '../services/api';
 import OutputFiles from '../components/OutputFiles';
+import FilePreview from '../components/FilePreview';
 import ToolCalls from '../components/ToolCalls';
 import Markdown, { MarkdownWorkspaceContext } from '../components/Markdown';
 import WorkflowBanner from '../components/WorkflowBanner';
@@ -52,6 +55,12 @@ import { applyMention, detectMention, filterMentionItems, type MentionQuery } fr
 // 前端任务状态轮询间隔（毫秒）。
 // 有 SSE 流式通道做实时增量，轮询只作兜底，故放宽到 5s 降低请求频率。
 const POLL_INTERVAL_MS = 5000;
+
+/** 图片预览用 inline 链接（浏览器内直接显示而非触发下载） */
+function inlineURL(url: string): string {
+  if (url.includes('inline=1')) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}inline=1`;
+}
 
 /** 正在被调用的工具（思考过程实时状态用） */
 interface CallingTool {
@@ -101,6 +110,12 @@ export default function ChatPage() {
   // 用户是否处于消息区底部。只有贴底时才自动跟随新内容滚动，
   // 用户向上翻阅历史时不被强制拉回底部。
   const isAtBottomRef = useRef(true);
+  // 是否刚切换对话（含首次进入）：为 true 时下一次定位用 auto 直接跳到底部、
+  // 不做平滑滑动动画，切到新对话的体验是「瞬间到最后一条」，而不是从旧位置滑过去。
+  const justSwitchedRef = useRef(true);
+  // 切换对话后的「稳定期」：期间异步撑高内容（图片/Markdown）会触发重新瞬间贴底，
+  // 稳定期结束或用户主动上滑后失效。见自动跟随滚动处的 MutationObserver。
+  const settlingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // 工作流结果分栏：默认展开、宽度默认 40vw（clamp 在 320–800 之间）。
   // 之所以独立出 collapsed/expanded 与 width 两个状态：宽度是连续量，
@@ -122,6 +137,10 @@ export default function ChatPage() {
   //   - 上传后立刻能拿到工作区路径与预览，用户发送前就能确认附件对不对
   //   - sendMessage 的契约保持纯 JSON，无需为附件改动对话协议
   const [pendingFiles, setPendingFiles] = useState<FileInfo[]>([]);
+  // 待发送附件里图片的 hover 悬浮预览：缩略图看不清，hover 时在鼠标旁放大显示。
+  const [hoverFilePreview, setHoverFilePreview] = useState<{ file: FileInfo; x: number; y: number } | null>(null);
+  // 点击缩略图后的全屏原图预览（复用 FilePreview 弹窗）
+  const [previewFile, setPreviewFile] = useState<FileInfo | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -174,6 +193,28 @@ export default function ChatPage() {
   }, [chatId, navigate]);
 
   useEffect(() => { fetchDetail(); }, [fetchDetail]);
+
+  // 切换对话：重置贴底标记，并让下一次定位用 auto 直接跳到最后一条消息，
+  // 不做平滑滑动（切到新对话应是「瞬间定位到最后」，而不是从旧位置滑过去）。
+  useEffect(() => {
+    isAtBottomRef.current = true;
+    justSwitchedRef.current = true;
+  }, [chatId]);
+
+  // 工作流状态轮询：工作流处于排队/执行中时，用 brief 模式只刷新 chat_info
+  // （含 workflow 状态与节点进度），不覆盖 detail.tasks —— 对话任务的详情由
+  // 批量 status 轮询 + SSE 驱动，这里只需工作流的实时状态，走轻量避免整段重渲染。
+  const refreshWorkflow = useCallback(async () => {
+    if (!chatId) return;
+    try {
+      const res = await getConversationDetail(chatId, true);
+      setDetail((prev) =>
+        prev ? { ...prev, chat_info: res.data.data.chat_info } : prev
+      );
+    } catch {
+      // 轮询尽力而为，失败等下一轮兜底
+    }
+  }, [chatId]);
 
   // 拉取「全部技能」与「本对话已启用的技能」。
   // 两个请求并发：技能条与 # 菜单都要用，串行会白白多等一个 RTT。
@@ -288,47 +329,50 @@ export default function ChatPage() {
 
   // Poll active tasks
   //
-  // 轮询不只判断任务是否结束，还要把最新的 task 内容写回列表 ——
-  // 后端在执行中就会实时返回已产生的 think_process，
-  // 不回写的话用户在任务跑完前看不到任何进展。
+  // 两层配合：
+  //   1. 批量状态接口（getTasksStatus）一次查清「哪些任务已终态」；
+  //   2. 对仍在活跃的任务也逐个 refreshTask 拉详情，让 think 进展与耗时持续更新。
+  // 不能只靠 SSE 驱动详情刷新 —— SSE 断连时 running 任务的思考过程会整体停更；
+  // 轮询必须兜底覆盖活跃任务。
   useEffect(() => {
     if (pollingTasks.size === 0) return;
     const interval = setInterval(async () => {
-      const stillActive = new Set(pollingTasks);
-      const updated: Record<string, TaskDetail> = {};
+      const ids = [...pollingTasks];
+      let list: TaskStatusItem[] = [];
+      try {
+        const res = await getTasksStatus(ids);
+        list = res.data.data?.list || [];
+      } catch {
+        return; // 网络抖动，保留轮询集等下一轮兜底
+      }
 
-      for (const taskId of pollingTasks) {
-        try {
-          const res = await getTaskDetail(taskId);
-          const t = res.data.data;
-          updated[taskId] = t;
-          if (t.task_status !== 1 && t.task_status !== 2) {
-            stillActive.delete(taskId);
-          }
-        } catch {
-          stillActive.delete(taskId);
+      const stillActive = new Set<string>();
+      const finished: string[] = [];
+      for (const id of ids) {
+        const s = list.find((x) => x.task_id === id);
+        if (!s) continue; // 任务已被清理，不再轮询
+        if (s.status === 1 || s.status === 2) {
+          stillActive.add(id);
+        } else {
+          finished.push(id);
         }
       }
 
-      // 用最新数据替换 detail.tasks 里对应的 task，保持顺序不变
-      if (Object.keys(updated).length > 0) {
-        setDetail((prev) =>
-          prev
-            ? { ...prev, tasks: prev.tasks.map((t) => updated[t.task_id] ?? t) }
-            : prev
-        );
+      // 活跃任务也要刷新详情（think 实时进展 + 耗时），终态任务刷最终结果
+      const toRefresh = [...stillActive, ...finished];
+      if (toRefresh.length > 0) {
+        await Promise.all(toRefresh.map((id) => refreshTask(id)));
       }
-
+      if (finished.length > 0) {
+        fetchDetail(); // 有任务收口，整段刷新重算轮询集
+      }
       setPollingTasks(stillActive);
-      if (stillActive.size < pollingTasks.size) {
-        fetchDetail(); // refresh full list when some tasks complete
-      }
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [pollingTasks, fetchDetail]);
+  }, [pollingTasks, fetchDetail, refreshTask]);
 
-  // 工作流状态轮询：工作流处于排队(1)或执行中(2)时，周期性刷新整段对话，
-  // 让横幅的状态徽标与节点进度实时更新。
+  // 工作流状态轮询：工作流处于排队(1)或执行中(2)时，周期性刷新工作流状态
+  // 徽标与节点进度。走 brief 模式只更新 chat_info，不覆盖对话任务列表。
   //
   // 注意：工作流任务（task_type=workflow）被 ListTasksByChatID 过滤，不在
   // detail.tasks 里，上面的对话任务轮询覆盖不到它，必须单独判断
@@ -338,10 +382,10 @@ export default function ChatPage() {
   useEffect(() => {
     if (!workflowActive) return;
     const interval = setInterval(() => {
-      fetchDetail();
+      refreshWorkflow();
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [workflowActive, fetchDetail]);
+  }, [workflowActive, refreshWorkflow]);
 
   // 对话层「活跃→全停」跳变（顶层工作流与所有对话任务都不再 running/queued）
   // 通知 Sidebar 重拉对话列表，刷新 has_running_task / has_failed_task —— 否则
@@ -494,15 +538,64 @@ export default function ChatPage() {
     if (!el) return;
     const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
     isAtBottomRef.current = dist < 80;
+    // 用户主动上滑离开底部：立刻结束稳定期，之后不再强制贴底
+    if (dist >= 80) settlingRef.current = false;
   }, []);
 
   // 自动跟随滚动：仅当用户本就停在底部时才滚到最新内容。
   // streamText 是 SSE 逐字增量、detail.tasks 是轮询/快照更新，两者都会撑高列表。
-  useEffect(() => {
-    if (isAtBottomRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  //
+  // 两种定位方式：
+  //   · 首次进入/切换对话 → scrollTop 直接赋值，瞬间到底，无任何动画；
+  //   · 之后跟随新消息    → smooth 平滑滚动。
+  //
+  // 「首次定位」必须绑定到「该对话的数据真正渲染出来」，而不是 effect 的第一次执行：
+  // 切换瞬间 detail 还是上一个对话的旧数据 / null，此时消息区是空的，若在这里就把
+  // 「首次」标记消耗掉，真正的消息到达时就会落入 smooth 分支，表现为「从顶部滑到底部」。
+  // 因此只在 detail 属于当前 chatId 且确有内容时才完成首次定位。
+  //
+  // 用 useLayoutEffect：在浏览器绘制之前同步设置 scrollTop，连「先闪一帧顶部」都不会有。
+  useLayoutEffect(() => {
+    if (!isAtBottomRef.current) return;
+    const el = messagesRef.current;
+    if (!el) return;
+
+    const dataReady =
+      detail?.chat_info?.chat_id === chatId && (detail?.tasks?.length ?? 0) > 0;
+
+    if (justSwitchedRef.current) {
+      if (!dataReady) return; // 数据还没到，保持「待定位」状态，别提前消耗
+      el.scrollTop = el.scrollHeight; // 同步赋值：瞬间到底，无动画
+      justSwitchedRef.current = false;
+      return;
     }
-  }, [detail?.tasks, streamText]);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [detail?.tasks, detail?.chat_info?.chat_id, streamText, chatId]);
+
+  // 首次定位后，图片/Markdown/代码块等异步渲染还会继续撑高内容，把刚贴底的位置
+  // 又推离底部，用户就会看到「落在中间、再慢慢滑到底」。
+  // 在切换后的短暂「稳定期」(1.5s) 内，用 MutationObserver 监听消息区 DOM 变化，
+  // 每次变化都瞬间重新贴底；稳定期结束、或用户自己上滑（isAtBottomRef=false）即停止，
+  // 因此不会干扰任务执行中的 smooth 跟随，也不会把正在翻历史的用户拉回底部。
+  useEffect(() => {
+    const el = messagesRef.current;
+    if (!el || typeof MutationObserver === 'undefined') return;
+    settlingRef.current = true;
+    const stick = () => {
+      if (settlingRef.current && isAtBottomRef.current) el.scrollTop = el.scrollHeight;
+    };
+    const mo = new MutationObserver(stick);
+    mo.observe(el, { childList: true, subtree: true, attributes: true });
+    // 图片等资源 load 事件不冒泡，用捕获阶段统一接住，加载完成后再贴一次底
+    el.addEventListener('load', stick, true);
+    const timer = window.setTimeout(() => { settlingRef.current = false; }, 1500);
+    return () => {
+      settlingRef.current = false;
+      window.clearTimeout(timer);
+      mo.disconnect();
+      el.removeEventListener('load', stick, true);
+    };
+  }, [chatId]);
 
   // 自动撑高 textarea，最多到 maxRows 行
   const autoResize = useCallback(() => {
@@ -918,21 +1011,47 @@ export default function ChatPage() {
             {/* 待发送附件条：上传成功后立即出现，发送时随消息带走 */}
             {(pendingFiles.length > 0 || uploading) && (
               <div className="pending-files">
-                {pendingFiles.map((f, i) => (
-                  <span key={f.path || i} className="pending-file-pill" title={f.path || f.name}>
-                    <span className="pending-file-icon" aria-hidden>
-                      {f.file_type === 1 ? '🖼' : f.file_type === 3 ? '📄' : '📦'}
+                {pendingFiles.map((f, i) => {
+                  const isImage = f.file_type === 1 && !!f.url;
+                  return (
+                    <span key={f.path || i} className="pending-file-pill" title={f.path || f.name}>
+                      {isImage ? (
+                        <span
+                          className="pending-file-thumb is-clickable"
+                          role="button"
+                          tabIndex={0}
+                          title={t('files.previewX', { name: f.name })}
+                          onMouseEnter={(e) => setHoverFilePreview({ file: f, x: e.clientX, y: e.clientY })}
+                          onMouseMove={(e) => setHoverFilePreview((p) => (p ? { ...p, x: e.clientX, y: e.clientY } : p))}
+                          onMouseLeave={() => setHoverFilePreview(null)}
+                          // 点击：收起悬浮层并打开全屏原图预览（与消息里的附件卡片同一套 FilePreview）
+                          onClick={() => { setHoverFilePreview(null); setPreviewFile(f); }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setHoverFilePreview(null);
+                              setPreviewFile(f);
+                            }
+                          }}
+                        >
+                          <img src={inlineURL(f.url!)} alt={f.name} draggable={false} />
+                        </span>
+                      ) : (
+                        <span className="pending-file-icon" aria-hidden>
+                          {f.file_type === 1 ? '🖼' : f.file_type === 3 ? '📄' : '📦'}
+                        </span>
+                      )}
+                      <span className="pending-file-name">{f.name}</span>
+                      <span
+                        className="pending-file-remove"
+                        onClick={() => removePendingFile(f.path, i)}
+                        title={t('chat.remove')}
+                      >
+                        ×
+                      </span>
                     </span>
-                    <span className="pending-file-name">{f.name}</span>
-                    <span
-                      className="pending-file-remove"
-                      onClick={() => removePendingFile(f.path, i)}
-                      title={t('chat.remove')}
-                    >
-                      ×
-                    </span>
-                  </span>
-                ))}
+                  );
+                })}
                 {uploading && (
                   <span className="pending-file-uploading">{t('chat.uploading')}</span>
                 )}
@@ -1078,6 +1197,29 @@ export default function ChatPage() {
         </>
       )}
     </div>
+
+    {/* 待发送附件里图片的 hover 悬浮放大预览：跟随鼠标，移开即消失。
+        输入框在页面底部，悬浮层默认放在鼠标右下方会被视口截断，
+        所以靠近底部/右侧时翻转到鼠标的左上方，保证大图始终完整可见。 */}
+    {hoverFilePreview && (() => {
+      const W = 420, H = 340, GAP = 16;
+      const flipX = hoverFilePreview.x + GAP + W > window.innerWidth;
+      const flipY = hoverFilePreview.y + GAP + H > window.innerHeight;
+      return (
+        <div
+          className="file-hover-preview"
+          style={{
+            left: flipX ? Math.max(8, hoverFilePreview.x - GAP - W) : hoverFilePreview.x + GAP,
+            top: flipY ? Math.max(8, hoverFilePreview.y - GAP - H) : hoverFilePreview.y + GAP,
+          }}
+        >
+          <img src={inlineURL(hoverFilePreview.file.url!)} alt={hoverFilePreview.file.name} />
+        </div>
+      );
+    })()}
+
+    {/* 点击缩略图：全屏原图预览 */}
+    {previewFile && <FilePreview file={previewFile} onClose={() => setPreviewFile(null)} />}
     </MarkdownWorkspaceContext.Provider>
   );
 }

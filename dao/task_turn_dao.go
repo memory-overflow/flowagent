@@ -160,6 +160,8 @@ type FinishTurnParams struct {
 	PromptTokens int
 	// CompletionTokens 输出 token
 	CompletionTokens int
+	// FirstTokenMs 首 token 耗时（毫秒）。仅流式 LLM 调用回传，其余为 0。
+	FirstTokenMs int64
 }
 
 // tokenUsage 从参数里取出三元组（LLM 调用），非 LLM 调用返回零值
@@ -177,7 +179,7 @@ func (d *TaskTurnDAO) FinishTurn(ctx context.Context, turnID int64, p FinishTurn
 	if err != nil {
 		return fmt.Errorf("finish turn: marshal output: %w", err)
 	}
-	return d.closeTurn(ctx, turnID, model.TurnStatusSuccess, outputJSON, "", p.tokenUsage())
+	return d.closeTurn(ctx, turnID, model.TurnStatusSuccess, outputJSON, "", p.tokenUsage(), p.FirstTokenMs)
 }
 
 // FailTurn 标记 turn 失败，回填错误原因与耗时。
@@ -195,7 +197,7 @@ func (d *TaskTurnDAO) FailTurn(ctx context.Context, turnID int64, reason error, 
 	if reason != nil {
 		msg = reason.Error()
 	}
-	return d.closeTurn(ctx, turnID, model.TurnStatusFailed, outputJSON, msg, extractTurnTokens(output))
+	return d.closeTurn(ctx, turnID, model.TurnStatusFailed, outputJSON, msg, extractTurnTokens(output), 0)
 }
 
 // turnTokens 一次 turn 的 token 消耗三元组。
@@ -238,7 +240,7 @@ func extractTurnTokens(output interface{}) turnTokens {
 // closeTurn 收尾一个 turn：写状态、输出、错误、耗时与 token 消耗
 func (d *TaskTurnDAO) closeTurn(
 	ctx context.Context, turnID int64,
-	status model.TurnStatus, outputJSON, errMsg string, tokens turnTokens,
+	status model.TurnStatus, outputJSON, errMsg string, tokens turnTokens, firstTokenMs int64,
 ) error {
 	db := d.getDB().WithContext(ctx)
 
@@ -272,6 +274,9 @@ func (d *TaskTurnDAO) closeTurn(
 	}
 	if tokens.completion > 0 {
 		updates["completion_tokens"] = tokens.completion
+	}
+	if firstTokenMs > 0 {
+		updates["first_token_ms"] = firstTokenMs
 	}
 
 	if err := db.Model(&model.TaskTurn{}).Where("id = ?", turnID).Updates(updates).Error; err != nil {

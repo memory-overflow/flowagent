@@ -8,8 +8,6 @@ import {
 } from '../services/api';
 import type { DBConfig, DBDriver, AgentSettings } from '../types/api';
 import { useT } from '../i18n';
-import { useTheme, type ThemeMode } from '../theme';
-import { useI18n, type Lang } from '../i18n';
 
 // 系统设置页：两件事 —— 外观与语言（本机偏好）、数据库连接（服务端配置）。
 //
@@ -23,8 +21,6 @@ import { useI18n, type Lang } from '../i18n';
 
 export default function SettingsPage() {
   const t = useT();
-  const { lang, setLang } = useI18n();
-  const { mode, setMode, resolved } = useTheme();
   const [loading, setLoading] = useState(true);
   const [cfg, setCfg] = useState<DBConfig | null>(null);
   const [driver, setDriver] = useState<DBDriver>('mysql');
@@ -151,58 +147,6 @@ export default function SettingsPage() {
     <div className="page-container">
       <div className="page-header">
         <h2>{t('settings.title')}</h2>
-      </div>
-
-      {/* ---- 外观与语言：纯前端偏好，存 localStorage ---- */}
-      <div className="task-card" style={{ marginTop: 0 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 2 }}>
-          {t('preferences.cardTitle')}
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-          {t('preferences.cardDesc')}
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <div className="form-group">
-            <label>{t('preferences.language')}</label>
-            <select
-              className="form-select"
-              value={lang}
-              onChange={(e) => setLang(e.target.value as Lang)}
-            >
-              <option value="zh">{t('preferences.langZh')}</option>
-              <option value="en">{t('preferences.langEn')}</option>
-            </select>
-            <div className="form-hint">{t('preferences.languageHint')}</div>
-          </div>
-
-          <div className="form-group">
-            <label>{t('preferences.theme')}</label>
-            <select
-              className="form-select"
-              value={mode}
-              onChange={(e) => setMode(e.target.value as ThemeMode)}
-            >
-              <option value="light">{t('preferences.themeLight')}</option>
-              <option value="dark">{t('preferences.themeDark')}</option>
-              <option value="system">{t('preferences.themeSystem')}</option>
-            </select>
-            <div className="form-hint">
-              {t('preferences.themeHint')}
-              {mode === 'system' && (
-                // 跟随系统时把「当前实际落到哪个」显式写出来，否则用户不确定生效没有
-                <span style={{ color: 'var(--text-secondary)' }}>
-                  {' '}
-                  {t('preferences.themeSystemResolved', {
-                    theme: resolved === 'dark'
-                      ? t('preferences.themeDarkName')
-                      : t('preferences.themeLightName'),
-                  })}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* ---- Agent 工具调用轮次 ---- */}

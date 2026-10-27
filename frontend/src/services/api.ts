@@ -173,8 +173,8 @@ export function listConversations(lastTs?: string, keyword?: string) {
 }
 
 /** 对话详情 */
-export function getConversationDetail(chatId: string) {
-  return http.post<CommonResponse<ConversationDetail>>('/conversations/detail', { chat_id: chatId });
+export function getConversationDetail(chatId: string, brief = false) {
+  return http.post<CommonResponse<ConversationDetail>>('/conversations/detail', { chat_id: chatId, brief });
 }
 
 // ============================================================
@@ -288,6 +288,30 @@ export function getTaskDetail(taskId: string) {
   return http.post<CommonResponse<TaskDetail>>('/tasks/detail', { task_id: taskId });
 }
 
+/** 批量状态查询返回的单个任务状态（轻量，不含 output 详情） */
+export interface TaskStatusItem {
+  task_id: string;
+  task_type: number;
+  status: number;
+  status_name: string;
+  stage: number;
+  stage_name: string;
+  phase: number;
+  phase_name: string;
+  progress: number;
+  turn_count: number;
+  start_ts: number;
+  end_ts: number;
+  failed_reason?: { code: number; message: string } | null;
+}
+
+/** 批量查询任务状态：前端轮询判断「哪些任务已终态」用，替代逐个 getTaskDetail 拉完整详情 */
+export function getTasksStatus(taskIds: string[]) {
+  return http.post<CommonResponse<{ list: TaskStatusItem[] }>>('/tasks/status', {
+    task_ids: taskIds,
+  });
+}
+
 export function stopTask(taskId: string) {
   return http.post<CommonResponse<null>>('/tasks/stop', { task_id: taskId });
 }
@@ -362,6 +386,8 @@ export interface TurnDebugView {
   start_ts: number;
   end_ts: number;
   time_cost_ms: number;
+  /** 首 token 耗时（毫秒），仅流式 LLM 调用有值，其余为 0 */
+  first_token_ms: number;
   /**
    * 由该 turn 派生的子任务 task_id（典型：deep_search 子任务）。
    * 调试页把它放在 turn 行尾部作为子任务调试入口；
@@ -406,7 +432,6 @@ export interface TaskDebugSummary {
   prompt_tokens: number;
   completion_tokens: number;
   input_text: string;
-  output_text?: string;
   failed_reason?: { code: number; message: string } | null;
 }
 
@@ -451,7 +476,6 @@ export interface SubTaskSummary {
   prompt_tokens: number;
   completion_tokens: number;
   input_text: string;
-  output_text?: string;
   failed_reason?: { code: number; message: string } | null;
   /** 子任务类型标记：deep_search 子任务会带 "deep_search"，普通 workflow 节点子任务为空 */
   sub_task_kind?: string;

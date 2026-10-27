@@ -552,6 +552,59 @@ func resetWorkflowNodeForRetry(dag *model.WorkflowOutputData, nodeID string) (fl
 }
 
 // ============================================================
+// GetTasksStatus — 批量任务状态查询（前端轮询用，轻量）
+// ============================================================
+//
+// 供对话页/工作流页轮询判断「哪些任务已终态」使用。相比逐个 GetTaskDetail
+// （每次读完整 task_output + 重建 think_process），本接口一次查一批、只投影
+// 轻量状态列，避免轮询把大字段反复拉进内存。
+
+// GetTasksStatusRequest 批量状态查询请求
+type GetTasksStatusRequest struct {
+	TaskIDs []string `json:"task_ids"`
+}
+
+// GetTasksStatusBinder 绑定
+func GetTasksStatusBinder() interface{} {
+	return &GetTasksStatusRequest{}
+}
+
+// GetTasksStatus 批量查询任务状态（不含 output 详情）。
+func GetTasksStatus(ctx *gin.Context, req interface{}) (interface{}, error) {
+	r := req.(*GetTasksStatusRequest)
+	if len(r.TaskIDs) == 0 {
+		return nil, &APIError{Code: http.StatusBadRequest, Msg: "task_ids 不能为空"}
+	}
+	taskDAO := &dao.TaskDAO{}
+	tasks, err := taskDAO.GetTaskStatusBatch(ctx, r.TaskIDs)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]gin.H, 0, len(tasks))
+	for _, t := range tasks {
+		if t == nil {
+			continue
+		}
+		items = append(items, gin.H{
+			"task_id":       t.TaskID,
+			"task_type":     int(t.TaskType),
+			"status":        int(t.Status),
+			"status_name":   taskStatusName(t.Status),
+			"stage":         t.Stage,
+			"stage_name":    model.TaskStage(t.Stage).String(),
+			"phase":         t.Phase,
+			"phase_name":    model.TaskPhase(t.Phase).String(),
+			"progress":      t.Progress,
+			"turn_count":    t.TurnCount,
+			"start_ts":      timeOrZero(t.StartTime),
+			"end_ts":        timeOrZero(t.EndTime),
+			"failed_reason": t.FailedReason.Data,
+		})
+	}
+	return gin.H{"list": items}, nil
+}
+
+// ============================================================
 // ListTaskTurns — 调试页面用：拉取任务所有 turn
 // ============================================================
 
@@ -691,6 +744,8 @@ type TurnDebugView struct {
 	StartTs          int64       `json:"start_ts"`
 	EndTs            int64       `json:"end_ts"`
 	TimeCostMs       int64       `json:"time_cost_ms"`
+	// FirstTokenMs 首 token 耗时（毫秒）。仅流式 LLM 调用有值，其余为 0。
+	FirstTokenMs     int64       `json:"first_token_ms"`
 	// SubTaskID 由该 turn 派生的子任务 task_id（如 deep_search 子任务）。
 	// 调试页把它放在 turn 行尾部作为子任务调试入口；老数据无映射时为空。
 	SubTaskID string `json:"sub_task_id,omitempty"`
@@ -734,7 +789,7 @@ func buildTaskTurnsSnapshot(ctx context.Context, taskID string) (gin.H, error) {
 	//
 	// 兼容旧数据：改动前跑完的子任务没写 parent_turn_id，无法挂到 turn 行，
 	// 退回顶层 unmapped_sub_tasks 列表兜底展示，避免入口完全消失。
-	subTasks, _ := taskDAO.ListSubTasksByParent(ctx, taskID)
+	subTasks, _ := taskDAO.ListSubTasksByParentLight(ctx, taskID)
 	turnToSubTask := make(map[int64]string, len(subTasks))
 	unmappedSubTasks := make([]gin.H, 0)
 	for _, st := range subTasks {
@@ -827,7 +882,6 @@ func buildTaskDebugSummary(
 		"completion_tokens": breakdown.CompletionTokens,
 		"input_text":        inputText,
 		"failed_reason":     task.FailedReason.Data,
-		"output_text":       task.TaskOutput,
 		// 子任务专属标记：deep_search 子任务用 SubTaskKind=SubTaskKindDeepSearch
 		// 区分于普通 workflow 节点子任务，前端可据此染色或加图标。
 		// SubTaskKind 写在 TaskInputData 里，Task 本体无该字段。
@@ -891,7 +945,7 @@ func ListSubTasks(ctx *gin.Context, req interface{}) (interface{}, error) {
 		return nil, &APIError{Code: http.StatusNotFound, Msg: "父任务不存在"}
 	}
 
-	subTasks, err := taskDAO.ListSubTasksByParent(ctx, r.ParentTaskID)
+	subTasks, err := taskDAO.ListSubTasksByParentLight(ctx, r.ParentTaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -935,6 +989,7 @@ func buildTurnDebugView(t *model.TaskTurn, subTaskID string, includePayload bool
 		ErrorMsg:         t.ErrorMsg,
 		StartTs:          t.StartTime.UnixMilli(),
 		TimeCostMs:       t.TimeCostMs,
+		FirstTokenMs:     t.FirstTokenMs,
 		SubTaskID:        subTaskID,
 	}
 	if t.EndTime != nil {

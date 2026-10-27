@@ -205,7 +205,7 @@ func (a *WorkflowActuator) driveWorkflow(
 		}
 		// 全部节点已归档同样是收口：为来源对话任务做一次结果汇总（此时绑定
 		// 节点只剩失败/废弃，汇总应给出失败原因）。
-		a.summarizeWorkflowResults(ctx, wfTask, dag)
+		a.summarizeWorkflowResults(ctx, wfTask, dag, model.TaskStatusCompleted)
 		log.Printf("[workflow-actuator][%s] no active node, nothing to run (total=%d)",
 			temp.TaskID, len(dag.Nodes))
 		return framework.AsyncTaskStatus{TaskStatus: framework.TASK_STATUS_SUCCESS}, nil
@@ -368,13 +368,13 @@ func (a *WorkflowActuator) driveWorkflow(
 			wfTask.TaskID, err)
 	}
 
-	// 工作流收口（终态）时，为每个来源对话任务做一次 LLM 结果汇总并落库。
+	// 为每个来源对话任务做一次 LLM 结果汇总并落库。
 	// 放在 Sync 之后：绑定节点状态刚回填，汇总拿到的就是最终状态。
-	// 幂等由 summarizeWorkflowResults 内部保证（已汇总的对话任务跳过）。
-	if wfStatus == model.TaskStatusCompleted || wfStatus == model.TaskStatusFailed ||
-		wfStatus == model.TaskStatusStopped {
-		a.summarizeWorkflowResults(ctx, wfTask, dag)
-	}
+	// 幂等由 summarizeForSourceTask 内部保证（已汇总的对话任务跳过），且只在
+	// 「该来源的绑定节点进入终态」时才真正调 LLM —— 因此每次驱动都调一遍是
+	// 安全的，能把「节点完成」到「整条工作流收口」之间的总结空窗压缩到
+	// 下一次驱动 tick。
+	a.summarizeWorkflowResults(ctx, wfTask, dag, wfStatus)
 
 	if changed {
 		dag.Nodes = nodes
@@ -816,18 +816,20 @@ func parseAgentOutput(raw string) *model.AgentOutputData {
 // 工作流收口后的结果汇总（LLM）
 // ============================================================
 
-// summarizeWorkflowResults 在工作流进入终态时，为每个来源对话任务做一次
-// LLM 结果汇总，落库到其 agent_output.WorkflowSummary。
+// summarizeWorkflowResults 为每个来源对话任务做一次 LLM 结果汇总，落库到其
+// agent_output.WorkflowSummary。每次工作流驱动都会调用，但内部按来源任务
+// 幂等 + 终态判断，只有「该来源的绑定节点进入终态」时才真正调 LLM。
 //
 // 为什么用 LLM 而不是机械拼接节点输出：机械拼接只会罗列中间过程，用户真正
 // 要的是「成功→最终产物与结论 / 失败→失败位置与原因」的语义汇总，这需要
-// 模型理解各节点产出之间的关系。汇总是一次性动作（工作流收口时），不是
-// 高频路径，多一次 LLM 调用可接受。
+// 模型理解各节点产出之间的关系。汇总是一次性动作（每个来源任务只汇总一次），
+// 不是高频路径，多一次 LLM 调用可接受。
 //
-// 幂等：对话任务的 WorkflowSummary 已非空则跳过，重复收口不会重复汇总。
+// 幂等：对话任务的 WorkflowSummary 已非空则跳过，重复驱动不会重复汇总。
 // 汇总失败只记日志不阻断 —— 工作流结果本身仍在 DAG 里可查。
 func (a *WorkflowActuator) summarizeWorkflowResults(
 	ctx context.Context, wfTask *model.Task, dag *model.WorkflowOutputData,
+	wfStatus model.TaskStatus,
 ) {
 	if dag == nil || len(dag.Nodes) == 0 || a.llmResolver == nil {
 		return
@@ -839,14 +841,22 @@ func (a *WorkflowActuator) summarizeWorkflowResults(
 		}
 	}
 	for sourceTaskID, nodes := range grouped {
-		a.summarizeForSourceTask(ctx, wfTask, sourceTaskID, nodes)
+		a.summarizeForSourceTask(ctx, wfTask, sourceTaskID, nodes, wfStatus)
 	}
 }
 
 // summarizeForSourceTask 对单个来源对话任务的绑定节点做一次 LLM 汇总并落库。
 func (a *WorkflowActuator) summarizeForSourceTask(
 	ctx context.Context, wfTask *model.Task, sourceTaskID string, nodes []model.WorkflowNodeData,
+	wfStatus model.TaskStatus,
 ) {
+	// 尚未到终态（绑定节点还在跑）不汇总 —— 先做内存判断，避免每轮驱动
+	// 都对仍在跑的来源任务空查一次 DB / 反序列化大 JSON。
+	bound, _ := model.DeriveBoundTaskStatus(nodes, wfStatus)
+	if bound == model.TaskStatusRunning || bound == model.TaskStatusQueued {
+		return
+	}
+
 	// 只处理对话任务；读出现有 agent_output 做幂等判断。
 	task, err := a.taskDAO.GetTaskByID(ctx, sourceTaskID)
 	if err != nil || task == nil || task.TaskType != model.TaskTypeConversation {
@@ -858,12 +868,6 @@ func (a *WorkflowActuator) summarizeForSourceTask(
 	}
 	if strings.TrimSpace(out.WorkflowSummary) != "" {
 		return // 已汇总过，跳过
-	}
-
-	// 尚未到终态（绑定节点还在跑）不汇总。
-	bound, _ := model.DeriveBoundTaskStatus(nodes, wfTask.Status)
-	if bound == model.TaskStatusRunning || bound == model.TaskStatusQueued {
-		return
 	}
 
 	summary, err := a.callSummarizeLLM(ctx, wfTask, nodes, bound)

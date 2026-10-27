@@ -54,6 +54,8 @@ export const debugNS = {
 
     // ---- 单条 turn ----
     round: '轮次 {n}',
+    firstToken: '首 token {ms}',
+    firstTokenTip: '从发起请求到收到首个内容增量的耗时（仅流式 LLM 调用）',
     unknownPhase: '未知阶段',
     clickToCollapse: '点击收起整个 turn',
     clickToExpand: '点击展开整个 turn',
@@ -131,6 +133,8 @@ export const debugNS = {
 
     // ---- Single turn ----
     round: 'Round {n}',
+    firstToken: 'first token {ms}',
+    firstTokenTip: 'Time from request to first content delta (streaming LLM calls only)',
     unknownPhase: 'Unknown phase',
     clickToCollapse: 'Click to collapse this turn',
     clickToExpand: 'Click to expand this turn',

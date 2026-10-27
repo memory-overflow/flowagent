@@ -82,6 +82,7 @@ func RegisterRoutes(router *gin.RouterGroup) {
 	task := api.Group("/tasks")
 	{
 		task.POST("/detail", Wrap(GetTaskDetailBinder, GetTaskDetail))
+		task.POST("/status", Wrap(GetTasksStatusBinder, GetTasksStatus))
 		task.POST("/stop", Wrap(StopTaskBinder, StopTask))
 		task.POST("/retry", Wrap(RetryTaskBinder, RetryTask))
 		// 单节点重试：重置指定节点及其下游，保留已完成上游

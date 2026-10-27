@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
+import PreferenceControls from './components/PreferenceControls';
 import ChatPage from './pages/ChatPage';
 import MCPServersPage from './pages/MCPServersPage';
 import SkillsPage from './pages/SkillsPage';
@@ -26,6 +27,7 @@ export default function App() {
     <ModelSetupGate>
       <div className="app-layout">
         <Sidebar />
+        <PreferenceControls />
         <main className="main-area">
           <ErrorBoundary>
             <Routes>

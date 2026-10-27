@@ -533,6 +533,11 @@ function TurnCard({ turn, open, onToggle, streamText, streamReasoning, streamToo
         <span className="debug-spacer" />
         <span className="debug-dim">{t('debug.round', { n: turn.round })}</span>
         <span className="debug-dim">{formatDuration(turn.time_cost_ms)}</span>
+        {turn.first_token_ms > 0 && (
+          <span className="debug-dim" title={t('debug.firstTokenTip')}>
+            {t('debug.firstToken', { ms: formatDuration(turn.first_token_ms) })}
+          </span>
+        )}
         {turn.total_tokens > 0 && (
           <span
             className="debug-dim"
@@ -718,6 +723,9 @@ function turnCtxBlocks(turn: TurnDebugView): TurnCtxBlocks | null {
 function ContextBlocksBlock({ blocks, promptTokens }: { blocks: TurnCtxBlocks; promptTokens: number }) {
   const t = useT();
   const blockMeta = useBlockMeta();
+  // 默认折叠：这是辅助信息（这轮上下文被什么撑大），不是每次都要看的核心内容，
+  // 折叠态只留一行总量摘要，点「展开」再看进度条与分段占比。
+  const [open, setOpen] = useState(false);
   const total = blocks.total || 0;
   const limit = blocks.context_limit || 0;
   const percent = limit > 0 ? (total / limit) * 100 : 0;
@@ -736,40 +744,48 @@ function ContextBlocksBlock({ blocks, promptTokens }: { blocks: TurnCtxBlocks; p
           {promptTokens > 0 ? t('debug.ctxProvider', { n: fmtTok(promptTokens) }) : ''}
           {overTrigger ? t('debug.ctxOverTrigger') : ''}
         </span>
+        <span className="debug-spacer" />
+        <button className="debug-mini-btn" onClick={() => setOpen(!open)}>
+          {open ? t('common.collapse') : t('common.expand')}
+        </button>
       </div>
 
-      {/* 分段彩色进度条（按占上限比例画，无上限时按占比归一化）+ 触发线刻度 */}
-      <div className="ctx-usage-bar">
-        {segments.map((s) => (
-          <div
-            key={s.key}
-            className="ctx-usage-bar-seg"
-            style={{ width: `${total > 0 ? (s.value / (limit || total)) * 100 : 0}%`, background: s.color }}
-            title={`${s.label} ${fmtTok(s.value)}`}
-          />
-        ))}
-        {limit > 0 && (
-          <div
-            className="ctx-usage-bar-trigger"
-            style={{ left: '80%' }}
-            title={t('debug.ctxTriggerLine')}
-          />
-        )}
-      </div>
-
-      <div className="ctx-usage-rows">
-        {segments.map((s) => (
-          <div key={s.key} className="ctx-usage-row" title={s.desc}>
-            <span className="ctx-usage-dot" style={{ background: s.color }} />
-            <span className="ctx-usage-label">{s.label}</span>
-            <span className="ctx-usage-spacer" />
-            <span className="ctx-usage-val">
-              {total > 0 ? `${((s.value / total) * 100).toFixed(1)}%` : '-'}
-            </span>
-            <span className="ctx-usage-tok">{fmtTok(s.value)}</span>
+      {open && (
+        <>
+          {/* 分段彩色进度条（按占上限比例画，无上限时按占比归一化）+ 触发线刻度 */}
+          <div className="ctx-usage-bar">
+            {segments.map((s) => (
+              <div
+                key={s.key}
+                className="ctx-usage-bar-seg"
+                style={{ width: `${total > 0 ? (s.value / (limit || total)) * 100 : 0}%`, background: s.color }}
+                title={`${s.label} ${fmtTok(s.value)}`}
+              />
+            ))}
+            {limit > 0 && (
+              <div
+                className="ctx-usage-bar-trigger"
+                style={{ left: '80%' }}
+                title={t('debug.ctxTriggerLine')}
+              />
+            )}
           </div>
-        ))}
-      </div>
+
+          <div className="ctx-usage-rows">
+            {segments.map((s) => (
+              <div key={s.key} className="ctx-usage-row" title={s.desc}>
+                <span className="ctx-usage-dot" style={{ background: s.color }} />
+                <span className="ctx-usage-label">{s.label}</span>
+                <span className="ctx-usage-spacer" />
+                <span className="ctx-usage-val">
+                  {total > 0 ? `${((s.value / total) * 100).toFixed(1)}%` : '-'}
+                </span>
+                <span className="ctx-usage-tok">{fmtTok(s.value)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -836,7 +852,8 @@ const DEBUG_PAGE_STYLE = `
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 20px;
+  /* 右侧给全局偏好控件（语言/主题）预留空间，避免遮挡跳转/展开按钮 */
+  padding: 12px 180px 12px 20px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
 }
