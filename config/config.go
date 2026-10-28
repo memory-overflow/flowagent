@@ -164,8 +164,10 @@ type DatabaseConfig struct {
 
 // LogConfig 日志配置
 type LogConfig struct {
-	Level string `yaml:"level"` // 日志级别: debug / info / warn / error，默认 info
-	File  string `yaml:"file"`  // 日志文件路径，为空则输出到 stdout
+	Level      string `yaml:"level"`        // 日志级别: debug / info / warn / error，默认 info
+	File       string `yaml:"file"`         // 日志文件路径，为空则输出到 stdout
+	MaxSizeMB  int    `yaml:"max_size_mb"`  // 单文件大小上限（MB），超过即滚动，默认 1024（1GB）
+	MaxBackups int    `yaml:"max_backups"`  // 保留的滚动备份数（不含当前文件），默认 4（当前 + 4 = 5 个文件）
 }
 
 // DriverName 返回归一化后的驱动名（空串视为 mysql）。
@@ -230,6 +232,12 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
+	}
+	if cfg.Log.MaxSizeMB <= 0 {
+		cfg.Log.MaxSizeMB = 1024
+	}
+	if cfg.Log.MaxBackups <= 0 {
+		cfg.Log.MaxBackups = 4
 	}
 	if cfg.Workspace.Root == "" {
 		cfg.Workspace.Root = "./workspace"

@@ -4,12 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	_ "net/http/pprof" // 注册 /debug/pprof/ 路由到 DefaultServeMux
-	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -20,6 +17,7 @@ import (
 	"github.com/memory-overflow/flowagent/dao"
 	"github.com/memory-overflow/flowagent/handler"
 	"github.com/memory-overflow/flowagent/model"
+	"github.com/memory-overflow/flowagent/pkg/logger"
 )
 
 func main() {
@@ -32,20 +30,19 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
-	// 配置日志输出：若指定了文件则同时写文件+控制台
+	// 配置日志：分级（debug/info/warn/error）+ 文件滚动（>1GB 自动切换、最多保留 5 个）。
+	if err := logger.Init(logger.Options{
+		Level:      cfg.Log.Level,
+		File:       cfg.Log.File,
+		MaxSizeMB:  cfg.Log.MaxSizeMB,
+		MaxBackups: cfg.Log.MaxBackups,
+	}); err != nil {
+		log.Fatalf("Failed to init logger: %v", err)
+	}
+	gin.DefaultWriter = logger.Writer()
+	gin.DefaultErrorWriter = logger.Writer()
 	if cfg.Log.File != "" {
-		if err := os.MkdirAll(filepath.Dir(cfg.Log.File), 0755); err != nil {
-			log.Fatalf("Failed to create log dir: %v", err)
-		}
-		f, err := os.OpenFile(cfg.Log.File, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err != nil {
-			log.Fatalf("Failed to open log file: %v", err)
-		}
-		multiWriter := io.MultiWriter(os.Stdout, f)
-		log.SetOutput(multiWriter)
-		gin.DefaultWriter = multiWriter
-		gin.DefaultErrorWriter = multiWriter
-		log.Printf("Log file: %s (stdout + file)", cfg.Log.File)
+		log.Printf("Log file: %s (stdout + file, rotate at %dMB, keep %d backups)", cfg.Log.File, cfg.Log.MaxSizeMB, cfg.Log.MaxBackups)
 	}
 
 	log.Printf("Config loaded: %s (port=%d, mode=%s)", *configPath, cfg.Server.Port, cfg.Server.Mode)
@@ -97,17 +94,9 @@ func main() {
 	// 设置 Gin 运行模式
 	gin.SetMode(cfg.Server.Mode)
 
-	// 创建路由（带日志中间件）
+	// 创建路由（访问日志移到 debug，默认级别下不刷屏）
 	router := gin.New()
-	router.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
-		return fmt.Sprintf("[GIN] %s | %3d | %13v | %-7s %s\n",
-			param.TimeStamp.Format("2006-01-02 15:04:05"),
-			param.StatusCode,
-			param.Latency,
-			param.Method,
-			param.Path,
-		)
-	}))
+	router.Use(accessLogger())
 	router.Use(gin.Recovery())
 
 	// 注册业务路由
@@ -117,6 +106,25 @@ func main() {
 	log.Printf("Workflow Agent API server starting on %s", addr)
 	if err := router.Run(addr); err != nil {
 		log.Fatalf("Server failed: %v", err)
+	}
+}
+
+// accessLogger 记录请求访问日志（debug 级），替换 gin 默认的 LoggerWithFormatter。
+//
+// 默认级别（info）下不输出；需要排查接口调用、或定位 scheduler → server 的
+// /internal/events 高频回调时，把 config 的 log.level 设为 debug 即可看到。
+func accessLogger() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		method := c.Request.Method
+		path := c.Request.URL.Path
+		c.Next()
+		logger.Debugf("[GIN] | %3d | %13v | %-7s %s",
+			c.Writer.Status(),
+			time.Since(start),
+			method,
+			path,
+		)
 	}
 }
 
