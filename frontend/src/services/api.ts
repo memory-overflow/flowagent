@@ -13,9 +13,11 @@ import type {
   SearchConfig,
   SearchTestResult,
   DBConfig,
+  AgentSettings,
   DBConfigUpdateResult,
   DBTestResult,
   WorkflowListItem,
+  AgentOutput,
 } from '../types/api';
 
 const http = axios.create({
@@ -171,8 +173,8 @@ export function listConversations(lastTs?: string, keyword?: string) {
 }
 
 /** 对话详情 */
-export function getConversationDetail(chatId: string) {
-  return http.post<CommonResponse<ConversationDetail>>('/conversations/detail', { chat_id: chatId });
+export function getConversationDetail(chatId: string, brief = false) {
+  return http.post<CommonResponse<ConversationDetail>>('/conversations/detail', { chat_id: chatId, brief });
 }
 
 // ============================================================
@@ -286,6 +288,30 @@ export function getTaskDetail(taskId: string) {
   return http.post<CommonResponse<TaskDetail>>('/tasks/detail', { task_id: taskId });
 }
 
+/** 批量状态查询返回的单个任务状态（轻量，不含 output 详情） */
+export interface TaskStatusItem {
+  task_id: string;
+  task_type: number;
+  status: number;
+  status_name: string;
+  stage: number;
+  stage_name: string;
+  phase: number;
+  phase_name: string;
+  progress: number;
+  turn_count: number;
+  start_ts: number;
+  end_ts: number;
+  failed_reason?: { code: number; message: string } | null;
+}
+
+/** 批量查询任务状态：前端轮询判断「哪些任务已终态」用，替代逐个 getTaskDetail 拉完整详情 */
+export function getTasksStatus(taskIds: string[]) {
+  return http.post<CommonResponse<{ list: TaskStatusItem[] }>>('/tasks/status', {
+    task_ids: taskIds,
+  });
+}
+
 export function stopTask(taskId: string) {
   return http.post<CommonResponse<null>>('/tasks/stop', { task_id: taskId });
 }
@@ -295,9 +321,33 @@ export function retryTask(taskId: string) {
   return http.post<CommonResponse<null>>('/tasks/retry', { task_id: taskId });
 }
 
+/** 重试工作流的单个失败节点及其下游，保留已完成上游 */
+export function retryWorkflowNode(workflowTaskId: string, nodeId: string) {
+  return http.post<CommonResponse<null>>('/tasks/retry-node', {
+    task_id: workflowTaskId,
+    node_id: nodeId,
+  });
+}
+
+/** 拉取工作流单个节点的完整 output（tool_calls / think 明细，详情接口已摘要化） */
+export function getWorkflowNodeDetail(workflowTaskId: string, nodeId: string) {
+  return http.post<CommonResponse<AgentOutput | null>>('/tasks/node-detail', {
+    task_id: workflowTaskId,
+    node_id: nodeId,
+  });
+}
+
 // ============================================================
 // 调试相关：拉取任务的所有 turn
 // ============================================================
+
+/** 单条 turn 的完整内容（含 input/output 大字段），调试页点开某条 turn 时按需拉取 */
+export function getTurnDetail(taskId: string, turnSeq: number) {
+  return http.post<CommonResponse<TurnDebugView>>('/tasks/turn-detail', {
+    task_id: taskId,
+    turn_seq: turnSeq,
+  });
+}
 
 /** 单条 turn 的调试视图 —— 与后端 TurnDebugView 对应 */
 export interface TurnDebugView {
@@ -336,6 +386,8 @@ export interface TurnDebugView {
   start_ts: number;
   end_ts: number;
   time_cost_ms: number;
+  /** 首 token 耗时（毫秒），仅流式 LLM 调用有值，其余为 0 */
+  first_token_ms: number;
   /**
    * 由该 turn 派生的子任务 task_id（典型：deep_search 子任务）。
    * 调试页把它放在 turn 行尾部作为子任务调试入口；
@@ -380,7 +432,6 @@ export interface TaskDebugSummary {
   prompt_tokens: number;
   completion_tokens: number;
   input_text: string;
-  output_text?: string;
   failed_reason?: { code: number; message: string } | null;
 }
 
@@ -425,7 +476,6 @@ export interface SubTaskSummary {
   prompt_tokens: number;
   completion_tokens: number;
   input_text: string;
-  output_text?: string;
   failed_reason?: { code: number; message: string } | null;
   /** 子任务类型标记：deep_search 子任务会带 "deep_search"，普通 workflow 节点子任务为空 */
   sub_task_kind?: string;
@@ -516,6 +566,14 @@ export function testModel(params: {
 // 配置保存在服务端的 config/db_config.json（不进 conf.yaml，密码也不随代码提交），
 // 保存后立即热生效（scheduler 由设置文件 watcher 在 2s 内跟随）。
 // ============================================================
+
+export function getAgentSettings() {
+  return http.post<CommonResponse<AgentSettings>>('/settings/agent/get', {});
+}
+
+export function updateAgentSettings(params: AgentSettings) {
+  return http.post<CommonResponse<AgentSettings>>('/settings/agent/update', params);
+}
 
 export function getDBConfig() {
   return http.post<CommonResponse<DBConfig>>('/settings/db/get', {});
@@ -755,6 +813,8 @@ export interface StreamEvent {
   turn_seq?: number;
   data?: {
     text?: string;
+    /** 思考链增量（reasoning_content），推理模型才有 */
+    reasoning?: string;
     tool_call?: ToolCallDelta;
     /** tool_calling 事件携带：正在被调用的工具名 */
     tool_name?: string;
@@ -786,6 +846,8 @@ export function subscribeTaskStream(
   handlers: {
     /** delta 增量文本；ev 携带 turn_id/turn_seq 供按 turn 关联（调试页实时输出用） */
     onDelta?: (text: string, ev: StreamEvent) => void;
+    /** delta 思考链增量（reasoning_content）；ev 携带 turn_id/turn_seq，调试页实时展示原始思考链 */
+    onReasoning?: (text: string, ev: StreamEvent) => void;
     /** 工具调用分片增量；ev 携带 turn_id/turn_seq，供调试页展示完整 raw 流式输出 */
     onToolCall?: (tc: ToolCallDelta, ev: StreamEvent) => void;
     /** 工具调用开始执行（turn 已建、尚未完成）；ev.data.tool_name 为工具名 */
@@ -819,6 +881,8 @@ export function subscribeTaskStream(
     const ev = parse(e as MessageEvent);
     const text = ev.data?.text;
     if (text) handlers.onDelta?.(text, ev);
+    const reasoning = ev.data?.reasoning;
+    if (reasoning) handlers.onReasoning?.(reasoning, ev);
     const tc = ev.data?.tool_call;
     if (tc) handlers.onToolCall?.(tc, ev);
   });

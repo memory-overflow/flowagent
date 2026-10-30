@@ -1,9 +1,9 @@
 // Package workspace — 内置 native 工具集。
 //
-// 提供 8 个默认对全部对话可用的本地落地工具（Go 原生实现）：
+// 提供默认对全部对话可用的本地落地工具（Go 原生实现）：
 //
-//	write_file / read_file / list_dir / create_dir / file_exists / run_command /
-//	get_current_time / deep_search
+//	write_file / read_file / list_dir / create_dir / file_exists / edit_file /
+//	delete_path / run_command / get_current_time / deep_search
 //
 // 单页联网抓取（web_fetch）不在此列 —— 它走 MCP（mcp-server-fetch），以获得
 // HTML→Markdown 结构化、charset 转码、robots 合规等更完整的抓取效果。
@@ -12,7 +12,7 @@
 // 让子任务内部跑「模型 + fetch」多轮循环，最后汇总成一份结论返回主对话。
 //
 // 设计原则：
-//   - 文件工具只接受相对路径，统一经 Manager.Resolve 校验，杜绝越界
+//   - 相对路径按任务工作区解析；绝对路径与 ~ 路径可直接访问系统目录
 //   - run_command 执行前复用 skill.DetectDangerousCommand 做危险删除拦截
 //   - read_file 返回内容做大小截断，避免撑爆 LLM 上下文
 package workspace
@@ -161,6 +161,8 @@ func BuiltinTools() []*ToolDef {
 		listDirTool(),
 		createDirTool(),
 		fileExistsTool(),
+		editFileTool(),
+		deletePathTool(),
 		runCommandTool(),
 		getCurrentTimeTool(),
 		deepSearchTool(),
@@ -212,9 +214,9 @@ func strProp(desc string) map[string]interface{} {
 func writeFileTool() *ToolDef {
 	return &ToolDef{
 		Name:        "write_file",
-		Description: "在工作区内创建或覆盖一个文本文件。path 为相对工作区的路径（如 src/main.go）；若只给文件名（如 report.md），会自动落到本任务的产出目录下。content 为完整文件内容。",
+		Description: "创建或覆盖一个文本文件。相对路径按任务工作区解析；绝对路径和 ~ 路径可访问系统任意目录。若只给文件名（如 report.md），会自动落到本任务的产出目录下。content 为完整文件内容。",
 		InputSchema: objectSchema(map[string]interface{}{
-			"path":    strProp("文件路径，相对工作区（禁止绝对路径与 .. 越界）。只给文件名时落在当前任务的产出目录下"),
+			"path":    strProp("文件路径；相对路径按任务工作区解析，绝对路径或 ~ 路径直接指向系统位置。只给文件名时落在当前任务的产出目录下"),
 			"content": strProp("要写入的完整文件内容"),
 		}, []string{"path", "content"}),
 		Handler: func(ctx context.Context, wc *Context, args map[string]interface{}) (string, error) {
@@ -269,9 +271,9 @@ func resolveArtifactPath(wc *Context, path string) string {
 func readFileTool() *ToolDef {
 	return &ToolDef{
 		Name:        "read_file",
-		Description: "读取工作区内的文本文件全文。path 为相对工作区的路径。超过 200KB 只返回前 200KB。",
+		Description: "读取文本文件全文。相对路径按任务工作区解析；绝对路径和 ~ 路径可访问系统任意目录。超过 200KB 只返回前 200KB。",
 		InputSchema: objectSchema(map[string]interface{}{
-			"path": strProp("文件路径，相对工作区"),
+			"path": strProp("文件路径；支持任务工作区相对路径、系统绝对路径和 ~ 路径"),
 		}, []string{"path"}),
 		Handler: func(ctx context.Context, wc *Context, args map[string]interface{}) (string, error) {
 			path := strArg(args, "path")
@@ -312,9 +314,9 @@ func readFileTool() *ToolDef {
 func listDirTool() *ToolDef {
 	return &ToolDef{
 		Name:        "list_dir",
-		Description: "列出工作区内指定目录下的条目（名称、类型、大小）。path 为相对工作区的目录路径。",
+		Description: "列出指定目录下的条目（名称、类型、大小）。相对路径按任务工作区解析；绝对路径和 ~ 路径可访问系统任意目录。",
 		InputSchema: objectSchema(map[string]interface{}{
-			"path": strProp("目录路径，相对工作区（留空或 . 表示工作区根）"),
+			"path": strProp("目录路径；相对路径按任务工作区解析，绝对路径或 ~ 路径直接指向系统位置（留空或 . 表示工作区根）"),
 		}, nil),
 		Handler: func(ctx context.Context, wc *Context, args map[string]interface{}) (string, error) {
 			path := strArg(args, "path")
@@ -377,9 +379,9 @@ func listDirTool() *ToolDef {
 func createDirTool() *ToolDef {
 	return &ToolDef{
 		Name:        "create_dir",
-		Description: "在工作区内创建目录（自动创建父目录）。path 为相对工作区的目录路径。",
+		Description: "创建目录并自动创建父目录。相对路径按任务工作区解析；绝对路径和 ~ 路径可访问系统任意目录。",
 		InputSchema: objectSchema(map[string]interface{}{
-			"path": strProp("目录路径，相对工作区"),
+			"path": strProp("目录路径；支持任务工作区相对路径、系统绝对路径和 ~ 路径"),
 		}, []string{"path"}),
 		Handler: func(ctx context.Context, wc *Context, args map[string]interface{}) (string, error) {
 			path := strArg(args, "path")
@@ -405,9 +407,9 @@ func createDirTool() *ToolDef {
 func fileExistsTool() *ToolDef {
 	return &ToolDef{
 		Name:        "file_exists",
-		Description: "检查工作区内某路径（文件或目录）是否存在。返回 true/false。",
+		Description: "检查某路径（文件或目录）是否存在。相对路径按任务工作区解析；绝对路径和 ~ 路径可访问系统任意目录。返回 true/false。",
 		InputSchema: objectSchema(map[string]interface{}{
-			"path": strProp("路径，相对工作区"),
+			"path": strProp("路径；支持任务工作区相对路径、系统绝对路径和 ~ 路径"),
 		}, []string{"path"}),
 		Handler: func(ctx context.Context, wc *Context, args map[string]interface{}) (string, error) {
 			path := strArg(args, "path")
@@ -425,6 +427,161 @@ func fileExistsTool() *ToolDef {
 				return "", fmt.Errorf("检查路径失败: %w", err)
 			}
 			return "true", nil
+		},
+	}
+}
+
+// ============================================================
+// 5.5 edit_file
+// ============================================================
+
+// editFileTool 对已有文本文件做精确编辑（相对路径按任务工作区解析，绝对路径和 ~ 路径可访问系统任意目录）。
+//
+// 为什么需要（区别于 write_file 整文件覆盖）：改几行就重写整个文件，
+// token 消耗大、且模型重写时容易「顺手」改错无关部分。精确编辑只动
+// 该动的地方，是主流 agent 框架的标准配置（参考 OpenHands 的
+// str_replace_editor、Claude Code 的 Edit）。
+//
+// 支持两种操作（command）：
+//   - str_replace：把 old_string 替换成 new_string
+//   - insert：在 anchor 之后插入 new_string；anchor 留空表示追加到文件末尾
+//
+// 两者都要求「匹配文本逐字符一致且恰好出现一次」：0 次报未找到，
+// 多次报不唯一（要求补上下文），从根上杜绝误替换。
+func editFileTool() *ToolDef {
+	return &ToolDef{
+		Name:        "edit_file",
+		Description: "对已有文本文件做精确编辑（相对路径按任务工作区解析，绝对路径和 ~ 路径可访问系统任意目录）。command=str_replace：把 old_string 替换成 new_string（old_string 必须恰好出现一次）；command=insert：在 anchor 之后插入 new_string（anchor 必须恰好出现一次，anchor 留空表示追加到文件末尾）。匹配文本必须逐字符一致，出现 0 次或多次都会报错，请提供足够上下文保证唯一。",
+		InputSchema: objectSchema(map[string]interface{}{
+			"command":    strProp("操作类型：str_replace 或 insert"),
+			"path":       strProp("文件路径；支持任务工作区相对路径、系统绝对路径和 ~ 路径"),
+			"old_string": strProp("command=str_replace 必填：要被替换的原文"),
+			"anchor":     strProp("command=insert 必填：插入位置的锚点文本，新内容插在它之后；留空表示追加到文件末尾"),
+			"new_string": strProp("要写入的新内容（str_replace 的替换文本，或 insert 的插入文本）"),
+		}, []string{"command", "path"}),
+		Handler: func(ctx context.Context, wc *Context, args map[string]interface{}) (string, error) {
+			command := strArg(args, "command")
+			path := strArg(args, "path")
+			newStr := strArg(args, "new_string")
+			if strings.TrimSpace(path) == "" {
+				return "", fmt.Errorf("edit_file 缺少 path 参数")
+			}
+			abs, err := resolveIn(wc, path)
+			if err != nil {
+				return "", err
+			}
+			data, err := os.ReadFile(abs)
+			if err != nil {
+				return "", fmt.Errorf("读取文件失败: %w", err)
+			}
+			content := string(data)
+
+			// 定位「要操作的锚文本」，并按命令执行替换 / 插入。
+			var target, action string
+			switch command {
+			case "str_replace":
+				target = strArg(args, "old_string")
+				action = "替换"
+				if target == "" {
+					return "", fmt.Errorf("str_replace 需要 old_string 参数")
+				}
+			case "insert":
+				target = strArg(args, "anchor")
+				action = "插入"
+			default:
+				return "", fmt.Errorf("edit_file 不支持的 command %q（只支持 str_replace / insert）", command)
+			}
+
+			var updated string
+			if command == "insert" && target == "" {
+				// anchor 留空：追加到文件末尾
+				updated = content + newStr
+			} else {
+				// 唯一性校验：0 次未找到，多次不唯一。
+				if n := strings.Count(content, target); n == 0 {
+					return "", fmt.Errorf("未在文件中找到要%s的文本，请先 read_file 确认内容", action)
+				} else if n > 1 {
+					return "", fmt.Errorf("要%s的文本出现了 %d 次，不唯一，请补充更多上下文使其唯一", action, n)
+				}
+				if command == "str_replace" {
+					updated = strings.Replace(content, target, newStr, 1)
+				} else {
+					updated = strings.Replace(content, target, target+newStr, 1)
+				}
+			}
+
+			if err := os.WriteFile(abs, []byte(updated), 0o644); err != nil {
+				return "", fmt.Errorf("写入文件失败: %w", err)
+			}
+
+			// 返回改动点附近的上下文，让模型确认改对了。
+			marker := newStr
+			if command == "insert" && target != "" {
+				marker = target + newStr
+			}
+			return fmt.Sprintf("已在 %s 中%s成功，改动点附近内容：\n%s", path, action, editSnippet(updated, marker)), nil
+		},
+	}
+}
+
+// editSnippet 提取 marker 在 content 中所在位置附近的一小段文本，供模型确认改动。
+func editSnippet(content, marker string) string {
+	if marker == "" {
+		return "  (空内容)"
+	}
+	idx := strings.Index(content, marker)
+	if idx < 0 {
+		return "  (未定位到改动点)"
+	}
+	lo := idx - 80
+	if lo < 0 {
+		lo = 0
+	}
+	hi := idx + len(marker) + 80
+	if hi > len(content) {
+		hi = len(content)
+	}
+	return "  ...\n  " + strings.ReplaceAll(strings.TrimSpace(content[lo:hi]), "\n", "\n  ") + "\n  ..."
+}
+
+// ============================================================
+// delete_path
+// ============================================================
+
+func deletePathTool() *ToolDef {
+	return &ToolDef{
+		Name:        "delete_path",
+		Description: "删除一个文件或目录（目录会递归删除）。相对路径按任务工作区解析；绝对路径和 ~ 路径可访问系统任意目录。文件系统根、家目录和关键系统路径等危险目标会被拦截。",
+		InputSchema: objectSchema(map[string]interface{}{
+			"path": strProp("要删除的文件或目录路径；支持任务工作区相对路径、系统绝对路径和 ~ 路径"),
+		}, []string{"path"}),
+		Handler: func(ctx context.Context, wc *Context, args map[string]interface{}) (string, error) {
+			path := strArg(args, "path")
+			if strings.TrimSpace(path) == "" {
+				return "", fmt.Errorf("delete_path 缺少 path 参数")
+			}
+			if reason := skill.DetectDangerousDeleteTarget(path); reason != "" {
+				return "", fmt.Errorf("拒绝删除危险目标 %q：%s", path, reason)
+			}
+			abs, err := resolveIn(wc, path)
+			if err != nil {
+				return "", err
+			}
+			info, err := os.Lstat(abs)
+			if err != nil {
+				if os.IsNotExist(err) {
+					return "", fmt.Errorf("删除目标不存在: %s", path)
+				}
+				return "", fmt.Errorf("检查删除目标失败: %w", err)
+			}
+			kind := "文件"
+			if info.IsDir() {
+				kind = "目录"
+			}
+			if err := os.RemoveAll(abs); err != nil {
+				return "", fmt.Errorf("删除%s失败: %w", kind, err)
+			}
+			return fmt.Sprintf("已删除%s %s", kind, path), nil
 		},
 	}
 }
@@ -515,7 +672,7 @@ func runCommandTool() *ToolDef {
 	shellName, shellFlag := shellCommand()
 	return &ToolDef{
 		Name: "run_command",
-		Description: fmt.Sprintf("在工作区目录内执行一条 shell 命令（%s %s），返回 stdout。适合编译、运行脚本、git 等。危险删除命令会被拦截。"+
+		Description: fmt.Sprintf("在工作区目录内执行一条 shell 命令（%s %s），返回 stdout。适合编译、运行脚本、git、探测环境等。不要用它创建或修改文件内容——新建或改文件请用 write_file / edit_file。危险删除命令会被拦截。"+
 			"可选 timeout_seconds 指定超时（默认 %d 秒，上限 %d 秒）：预计耗时较长的命令"+
 			"（全盘搜索、全量编译、大批量文件处理）请主动放宽，否则会被默认超时打断。",
 			shellName, shellFlag, int(DefaultTimeout.Seconds()), int(maxCommandTimeout.Seconds())),
@@ -852,8 +1009,11 @@ func AnalyzeImageTool() *ToolDef {
 	return &ToolDef{
 		Name:        "analyze_image",
 		Description: "理解/分析工作区内的一张图片，返回图片的结构化描述（含图中文字、物体、布局、图表数据等）。当用户提供图片、需要识别或理解图中内容时优先使用本工具，不要用 read_file（图片是二进制会乱码）或 run_command 跑 OCR。",
+		// 图片理解要等待一次完整的多模态模型调用，可能包含较长推理。
+		// 对齐调度器 functionalCallTimeout=15m；workspace 是低层包，不能反向 import schedule。
+		Timeout: 15 * time.Minute,
 		InputSchema: objectSchema(map[string]interface{}{
-			"path":     strProp("图片路径，相对工作区（如 images/流程图.png）"),
+			"path":     strProp("图片路径；支持任务工作区相对路径、系统绝对路径和 ~ 路径（如 images/流程图.png）"),
 			"question": strProp("（可选）希望重点回答的关于图片的问题；不填则返回图片的通用结构化描述"),
 		}, []string{"path"}),
 		Handler: func(ctx context.Context, wc *Context, args map[string]interface{}) (string, error) {
@@ -908,43 +1068,45 @@ func imageMimeType(ext string) string {
 // 内部辅助
 // ============================================================
 
-// resolveIn 把相对路径解析到当前任务工作区内（沙箱校验）。写操作用这个，
-// 严格限制在工作区内。
-func resolveIn(wc *Context, relPath string) (string, error) {
-	return resolveInScope(wc, relPath, false)
+// resolveIn 统一解析文件工具路径：绝对路径直接访问系统位置，~ 展开为当前
+// 用户家目录；相对路径仍由 Manager.Resolve 解析到任务工作区并阻止 .. 越界。
+func resolveIn(wc *Context, inputPath string) (string, error) {
+	return resolveInScope(wc, inputPath, false)
 }
 
-// resolveReadable 同 resolveIn，但额外放行项目根内的绝对路径。
-//
-// 只读浏览场景需要它：模型经常要查看项目自身的目录/文件（如浏览
-// skills/ 下的脚本），传的是项目根内的绝对路径，按老沙箱一律拒绝会让
-// 模型寸步难行；而 run_command 本就没有路径沙箱（cwd 虽在工作区，命令
-// 却可以触达任意路径），对只读工具单独收紧并无安全收益。
-// 写操作（write_file / create_dir）不走这里，仍严格限制在工作区内。
-func resolveReadable(wc *Context, relPath string) (string, error) {
-	return resolveInScope(wc, relPath, true)
+// resolveReadable 与 resolveIn 使用相同的开放路径策略，保留独立函数名以表达调用意图。
+func resolveReadable(wc *Context, inputPath string) (string, error) {
+	return resolveInScope(wc, inputPath, true)
 }
 
-func resolveInScope(wc *Context, relPath string, allowProjectRoot bool) (string, error) {
+// allowProjectRoot 为兼容旧调用签名保留；绝对路径现已统一开放，不再限定 ProjectRoot。
+func resolveInScope(wc *Context, inputPath string, allowProjectRoot bool) (string, error) {
+	_ = allowProjectRoot
 	if wc == nil || strings.TrimSpace(wc.WorkspaceDir) == "" {
 		return "", fmt.Errorf("当前任务没有工作区目录，无法执行文件操作")
 	}
 
-	rel := strings.TrimSpace(relPath)
-	if allowProjectRoot && wc.ProjectRoot != "" &&
-		(filepath.IsAbs(rel) || strings.HasPrefix(rel, "~") || isDrivePath(rel)) {
-		// 绝对路径：仅当落在项目根内时放行（返回项目根内的绝对路径）。
-		if rootAbs, rerr := filepath.Abs(wc.ProjectRoot); rerr == nil {
-			clean := filepath.Clean(rel)
-			if withinDir(rootAbs, clean) {
-				return clean, nil
-			}
+	p := strings.TrimSpace(inputPath)
+	if strings.HasPrefix(p, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("展开家目录路径失败: %w", err)
 		}
-		// 项目根之外的绝对路径继续走原沙箱 → 被拒绝。
+		switch {
+		case p == "~":
+			p = home
+		case strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`):
+			p = filepath.Join(home, p[2:])
+		default:
+			return "", fmt.Errorf("不支持其他用户的家目录路径 %q", inputPath)
+		}
+	}
+	if filepath.IsAbs(p) || isDrivePath(p) {
+		return filepath.Clean(p), nil
 	}
 
 	m := &Manager{root: wc.WorkspaceDir}
-	return m.Resolve(wc.WorkspaceDir, relPath)
+	return m.Resolve(wc.WorkspaceDir, inputPath)
 }
 
 // limitedBuffer 一个带上限的输出缓冲：超过上限后丢弃多余字节，但 Write 仍返回

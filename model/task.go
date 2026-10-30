@@ -328,6 +328,23 @@ type ToolCallRecord struct {
 	Summary string `json:"summary,omitempty"`
 }
 
+// MaxToolCallOutputChars tool_call 记录里 Output 字段的最大字符数（按 rune）。
+//
+// read_file / run_command 等工具的输出可能很大（读大文件全文、命令完整 stdout），
+// 全量复制进 task_output.tool_calls 会让工作流的 task_output 膨胀到 MB 级，
+// 拖慢详情接口（DB 读 + JSON 解析）。落库时就截断，从源头控制 task_output 体积。
+// 完整输出仍在 task_turn 表，调试可回查。
+const MaxToolCallOutputChars = 4 * 1024
+
+// TruncateToolCallOutput 截断 tool_call 的输出，超过上限时加标记。
+func TruncateToolCallOutput(s string) string {
+	if n := len([]rune(s)); n > MaxToolCallOutputChars {
+		r := []rune(s)
+		return string(r[:MaxToolCallOutputChars]) + "\n…(输出过大，已截断)…"
+	}
+	return s
+}
+
 // AgentOutput 单 agent 任务输出
 type AgentOutputData struct {
 	ReplyText    string           `json:"reply_text"`
@@ -696,7 +713,9 @@ type Task struct {
 	// 任务 ID
 	TaskID string `gorm:"column:task_id;size:100;primaryKey"`
 	// 父任务 ID（工作流子任务时有值）
-	ParentTaskID string `gorm:"column:parent_task_id;size:100"`
+	// parent_created 复合索引供「按父任务查子任务」走索引，避免 ListSubTasksByParent
+	// 全表扫描（子任务列表 / token 递归聚合 / 停止级联都是高频路径）。
+	ParentTaskID string `gorm:"column:parent_task_id;size:100;index:,composite:parent_created,priority:1"`
 	// Title 任务标题。目前只有工作流任务使用 —— 一个对话可以有多个工作流，
 	// 切换器要按标题区分它们（对话任务本身就是一条消息，不需要额外标题）。
 	// 冗余自 WorkflowOutputData.Title，供列表页轻量查询，避免解析 longtext。
@@ -767,7 +786,7 @@ type Task struct {
 	// （每轮都要重建历史 + 计量 token，代价不低）。
 	DeferCount int `gorm:"column:defer_count;not null;default:0"`
 	// 创建时间
-	CreatedAt time.Time `gorm:"column:created_time;not null;index:,composite:chat_status_created,priority:3;index:,composite:stage_status_created,priority:3"`
+	CreatedAt time.Time `gorm:"column:created_time;not null;index:,composite:chat_status_created,priority:3;index:,composite:stage_status_created,priority:3;index:,composite:parent_created,priority:2"`
 	// 最后更新时间
 	UpdatedAt time.Time `gorm:"column:updated_time;not null;autoUpdateTime"`
 	// 删除时间

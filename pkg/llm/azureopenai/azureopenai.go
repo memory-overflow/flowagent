@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -409,10 +410,39 @@ type toolCallAcc struct {
 	argsBuf strings.Builder
 }
 
+// bodyPrefixCapture 在读取响应体的同时，记录开头 maxBytes 字节的原始内容。
+//
+// 用途：流式解析出「空结果」（无正文、无工具调用）时，光看空 ChatResult 无法判断
+// 是网关真的吐了空 SSE，还是吐了一段非 SSE 的裸 JSON（例如 200 + {"error":...}）——
+// 后者会被 parseStream 的 `HasPrefix("data:")` 过滤掉、静默变成空。打印原始前缀
+// 能一眼区分这两种情况，把「抖动」和「真错误被吞」分开。
+type bodyPrefixCapture struct {
+	r      io.Reader
+	prefix []byte
+	max    int
+}
+
+func (c *bodyPrefixCapture) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	if n > 0 && len(c.prefix) < c.max {
+		need := c.max - len(c.prefix)
+		if n < need {
+			need = n
+		}
+		c.prefix = append(c.prefix, p[:need]...)
+	}
+	return n, err
+}
+
+// emptyResultLogPrefixBytes 空结果时打印的原始响应前缀字节数。
+// 只需要足够识别「是 SSE / 是 JSON 错误体 / 是空 body」即可，过长无意义。
+const emptyResultLogPrefixBytes = 512
+
 // parseStream 解析 text/event-stream 响应，逐 chunk 回调文本增量，
 // 累积工具调用分片，最终返回与阻塞式等价的 ChatResult。
 func parseStream(body io.Reader, onDelta func(llm.StreamDelta)) (*llm.ChatResult, error) {
-	scanner := bufio.NewScanner(body)
+	capture := &bodyPrefixCapture{r: body, max: emptyResultLogPrefixBytes}
+	scanner := bufio.NewScanner(capture)
 	// 单行 data 可能很长（含大段 arguments），放大默认 buffer
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 
@@ -422,11 +452,23 @@ func parseStream(body io.Reader, onDelta func(llm.StreamDelta)) (*llm.ChatResult
 	maxIndex := -1
 	var usage llm.Usage
 
+	// 识别「非 SSE 的裸错误体」：网关在流式下可能返回 200 + {"error":{...}}（不是 data: 行），
+	// 这些行会被下面的 HasPrefix("data:") 跳过。记录是否见过 data: 行、并收集非 data 内容，
+	// 循环结束后据此兜底，把真实错误暴露出来而不是静默吞成空结果。
+	sawDataLine := false
+	var nonData strings.Builder
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" || !strings.HasPrefix(line, "data:") {
+		if line == "" {
 			continue
 		}
+		if !strings.HasPrefix(line, "data:") {
+			nonData.WriteString(line)
+			nonData.WriteByte('\n')
+			continue
+		}
+		sawDataLine = true
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
 			break
@@ -461,6 +503,8 @@ func parseStream(body io.Reader, onDelta func(llm.StreamDelta)) (*llm.ChatResult
 		}
 		if delta.ReasoningContent != "" {
 			reasonBuf.WriteString(delta.ReasoningContent)
+			// 思考链增量一并透传：调试页据此实时展示原始 reasoning_content。
+			onDelta(llm.StreamDelta{Reasoning: delta.ReasoningContent})
 		}
 		for _, tcd := range delta.ToolCalls {
 			acc := accs[tcd.Index]
@@ -491,6 +535,20 @@ func parseStream(body io.Reader, onDelta func(llm.StreamDelta)) (*llm.ChatResult
 		return nil, fmt.Errorf("scan azure stream response: %w", err)
 	}
 
+	// 非 SSE 响应体兜底：全程没见到 data: 行，说明网关返回的根本不是流。
+	// 典型：gpt-5.6-sol 网关在流式下对「tool_call_id 配对不完整」返回 200 + 裸 JSON 错误体
+	// （含 "error" 字段），这段会被上面的 HasPrefix("data:") 全部跳过；不当成错误
+	// 就会被误判成「模型没吐内容 / 没吐工具调用」。
+	if !sawDataLine {
+		if trimmed := strings.TrimSpace(nonData.String()); trimmed != "" {
+			var errResp azureResponse
+			if json.Unmarshal([]byte(trimmed), &errResp) == nil && errResp.Error != nil {
+				return nil, fmt.Errorf("azure stream error (non-SSE body): %s", errResp.Error.describe())
+			}
+			log.Printf("[azure] stream body is not SSE (no data lines): %q", truncate(trimmed, 300))
+		}
+	}
+
 	result := &llm.ChatResult{Text: textBuf.String(), Reasoning: reasonBuf.String(), Usage: usage}
 	// tool_calls 按 index 升序输出，保持模型原始顺序
 	for i := 0; i <= maxIndex; i++ {
@@ -502,6 +560,11 @@ func parseStream(body io.Reader, onDelta func(llm.StreamDelta)) (*llm.ChatResult
 			Name:      acc.name,
 			Arguments: parseArgs(acc.argsBuf.String()),
 		})
+	}
+	// 空结果打原始前缀：正文与工具调用都为空时，空 ChatResult 本身无法区分
+	// 「网关真空返回」与「非 SSE 裸 JSON 被过滤」两类情况，前缀日志是关键排查线索。
+	if result.Text == "" && len(result.ToolCalls) == 0 {
+		log.Printf("[azure] stream returned empty content, raw body prefix: %q", string(capture.prefix))
 	}
 	return result, nil
 }

@@ -81,6 +81,8 @@ export default function OutputFiles({ files, label, compact }: Props) {
   const [preview, setPreview] = useState<FileInfo | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
   const [revealing, setRevealing] = useState<string | null>(null);
+  // 图片缩略图 hover 悬浮预览：缩略图太小看不清，hover 时在鼠标旁放大显示。
+  const [hoverPreview, setHoverPreview] = useState<{ file: FileInfo; x: number; y: number } | null>(null);
   // 产物过多时默认折叠：比如 PDF 转图片一次产出 13+ 张，全部平铺会把
   // 对话流撑出好几屏。默认只展示前 COLLAPSE_LIMIT 个，展开是显式动作。
   const overLimit = files.length > COLLAPSE_LIMIT;
@@ -148,7 +150,12 @@ export default function OutputFiles({ files, label, compact }: Props) {
               }}
             >
               {showThumb ? (
-                <span className="file-card-thumb">
+                <span
+                  className="file-card-thumb"
+                  onMouseEnter={(e) => setHoverPreview({ file: f, x: e.clientX, y: e.clientY })}
+                  onMouseMove={(e) => setHoverPreview((p) => (p ? { ...p, x: e.clientX, y: e.clientY } : p))}
+                  onMouseLeave={() => setHoverPreview(null)}
+                >
                   <img src={inlineURL(f.url!)} alt={f.name} />
                 </span>
               ) : (
@@ -221,6 +228,16 @@ export default function OutputFiles({ files, label, compact }: Props) {
         >
           {expanded ? t('files.collapseAll') : t('files.expandAll', { n: files.length })}
         </button>
+      )}
+
+      {/* 图片缩略图 hover 时的悬浮放大预览：跟随鼠标，移开即消失 */}
+      {hoverPreview && (
+        <div
+          className="file-hover-preview"
+          style={{ left: hoverPreview.x + 16, top: hoverPreview.y + 16 }}
+        >
+          <img src={inlineURL(hoverPreview.file.url!)} alt={hoverPreview.file.name} />
+        </div>
       )}
 
       {preview && <FilePreview file={preview} onClose={() => setPreview(null)} />}

@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/memory-overflow/flowagent/config"
 	"github.com/memory-overflow/flowagent/dao"
 	"github.com/memory-overflow/flowagent/model"
 	"github.com/memory-overflow/flowagent/pkg/stream"
@@ -208,7 +209,7 @@ func (s *StageTransitionStore) resolveHint(
 	}
 
 	hint := &model.StageTransitionHint{
-		MaxToolCallRound: model.DefaultMaxToolCallRound,
+		MaxToolCallRound: config.CurrentAgentSettings().SingleAgentMaxToolCallRounds,
 	}
 
 	turnDAO := &dao.TaskTurnDAO{}
@@ -603,7 +604,7 @@ func buildToolCallRecordForFailed(t *model.TaskTurn) model.ToolCallRecord {
 	if t.Output != "" {
 		var o model.TurnToolOutput
 		if json.Unmarshal([]byte(t.Output), &o) == nil {
-			rec.Output = o.Content
+			rec.Output = model.TruncateToolCallOutput(o.Content)
 		}
 	}
 	if t.ErrorMsg != "" && rec.Output == "" {

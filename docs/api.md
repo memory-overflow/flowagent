@@ -240,13 +240,15 @@ curl -X POST $BASE/conversations/chat -H 'Content-Type: application/json' \
 
 ```
 POST /api/v1/conversations/list     # 瀑布流分页：{last_ts?, keyword?, page_size?} → {list, total, has_more}
-POST /api/v1/conversations/detail   # {chat_id} → {chat_info, tasks}
+POST /api/v1/conversations/detail   # {chat_id, brief?} → {chat_info, tasks}
 POST /api/v1/conversations/delete   # {chat_id}
 POST /api/v1/conversations/update-model  # {chat_id, model_id}
 POST /api/v1/conversations/update-title  # {chat_id, title}
 ```
 
 `detail` 的 `tasks` 是该对话下所有**对话任务**（task_type=1）详情，工作流任务不在其中（见 §5.3）。
+
+`brief`（可选，默认 false）：轮询模式。置 `true` 时只返回 `chat_info`（含工作流摘要与节点状态/进度），跳过对话任务详情渲染与 think 重建，`tasks` 返回空数组 —— 供工作流页/对话页周期轮询降载，避免每次把 MB 级任务输出与 turn 明细反复拉取。
 
 #### 5.1.4 对话级 MCP / Skill 绑定
 
@@ -270,7 +272,15 @@ POST /api/v1/conversations/skills/remove # {chat_id, skill_ids[]}
 POST /api/v1/tasks/detail      # {task_id} → TaskDetail
 ```
 
-#### 5.2.2 停止任务
+#### 5.2.2 批量查询任务状态（轻量轮询）
+
+```
+POST /api/v1/tasks/status      # {task_ids: []} → {list: [{task_id, task_type, status, status_name, stage, phase, progress, turn_count, start_ts, end_ts, failed_reason}]}
+```
+
+只返回轻量状态字段、不含 `output` 详情。供轮询判断「哪些任务已终态」使用，替代逐个 `tasks/detail` 拉完整详情。执行中的思考过程请用 SSE（§6）实时接收。
+
+#### 5.2.3 停止任务
 
 ```
 POST /api/v1/tasks/stop        # {task_id}
@@ -278,7 +288,7 @@ POST /api/v1/tasks/stop        # {task_id}
 
 停止一个非终态任务，并**级联停止其整棵子树**里仍在排队/运行中的后代任务（含 deep_search 孙层子任务）。
 
-#### 5.2.3 重试任务
+#### 5.2.4 重试任务
 
 ```
 POST /api/v1/tasks/retry       # {task_id}
@@ -286,12 +296,16 @@ POST /api/v1/tasks/retry       # {task_id}
 
 按任务类型分派：工作流任务保留已完成节点、重置失败节点及其下游；对话任务从失败发生的 stage 断点续跑。仅失败/终止态可重试。
 
-#### 5.2.4 调试接口（可选）
+#### 5.2.5 调试接口（可选）
 
 ```
-POST /api/v1/tasks/turns       # {task_id} → 完整 turn 列表（调试页用）
-POST /api/v1/tasks/sub-tasks   # {parent_task_id} → 子任务摘要列表（deep_search / 节点子任务）
+POST /api/v1/tasks/turns        # {task_id} → turn 元信息列表（不含 input/output 大字段）
+POST /api/v1/tasks/turn-detail  # {task_id, turn_seq} → 单条 turn 完整 payload（点开才拉）
+POST /api/v1/tasks/node-detail  # {task_id, node_id} → 工作流单节点完整 output（点开才拉）
+POST /api/v1/tasks/sub-tasks    # {parent_task_id} → 子任务摘要列表（deep_search / 节点子任务）
 ```
+
+调试页列表接口默认只返回元信息，input/output 等大字段由 `turn-detail` / `node-detail` 点开时按需拉取，避免列表一次传输 MB 级历史。
 
 ### 5.3 工作流模块（一对话多工作流）
 

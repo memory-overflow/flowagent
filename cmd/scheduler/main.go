@@ -14,7 +14,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	_ "net/http/pprof" // 注册 /debug/pprof/ 路由到 DefaultServeMux
@@ -29,6 +28,7 @@ import (
 	"github.com/memory-overflow/flowagent/dao"
 	"github.com/memory-overflow/flowagent/model"
 	"github.com/memory-overflow/flowagent/pkg/contextmgr"
+	"github.com/memory-overflow/flowagent/pkg/logger"
 	mcppkg "github.com/memory-overflow/flowagent/pkg/mcp"
 	"github.com/memory-overflow/flowagent/pkg/stream"
 	"github.com/memory-overflow/flowagent/schedule"
@@ -45,19 +45,22 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// 配置日志输出：若指定了文件则同时写文件+控制台
-	// scheduler 使用独立日志文件，避免与 server 相互覆盖
-	if cfg.Log.File != "" {
-		logPath := schedulerLogPath(cfg.Log.File)
-		if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
-			log.Fatalf("Failed to create log dir: %v", err)
-		}
-		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err != nil {
-			log.Fatalf("Failed to open log file: %v", err)
-		}
-		log.SetOutput(io.MultiWriter(os.Stdout, f))
-		log.Printf("Log file: %s (stdout + file)", logPath)
+	// 配置日志：分级 + 文件滚动（>1GB 自动切换、最多保留 5 个）。
+	// scheduler 使用独立日志文件，避免与 server 相互覆盖。
+	logPath := cfg.Log.File
+	if logPath != "" {
+		logPath = schedulerLogPath(logPath)
+	}
+	if err := logger.Init(logger.Options{
+		Level:      cfg.Log.Level,
+		File:       logPath,
+		MaxSizeMB:  cfg.Log.MaxSizeMB,
+		MaxBackups: cfg.Log.MaxBackups,
+	}); err != nil {
+		log.Fatalf("Failed to init logger: %v", err)
+	}
+	if logPath != "" {
+		log.Printf("Log file: %s (stdout + file, rotate at %dMB, keep %d backups)", logPath, cfg.Log.MaxSizeMB, cfg.Log.MaxBackups)
 	}
 
 	log.Printf("Config loaded: %s", *configPath)

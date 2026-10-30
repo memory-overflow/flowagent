@@ -131,7 +131,7 @@ func NewStageScheduler(cfg *config.Config) (*StageScheduler, error) {
 	// 模型配置来自 DB 的 model_config 表（前端「模型」页增删改）；config.LLM
 	// 仅作为「DB 里没有任何模型」时的兜底，保证未做前端配置的部署照常运行。
 	modelConfigDAO := &dao.ModelConfigDAO{}
-	llmResolver := llmreg.NewResolver(&modelConfigLoader{dao: modelConfigDAO}, buildFallbackClient(cfg))
+	llmResolver := llmreg.NewResolverWithFallbackSpec(&modelConfigLoader{dao: modelConfigDAO}, fallbackModelSpec(cfg))
 	log.Printf("[stage-scheduler] llm resolver ready (fallback provider=%s model=%s)",
 		cfg.LLM.Provider, cfg.LLM.Model)
 

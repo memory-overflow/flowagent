@@ -7,6 +7,7 @@ package actuator
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/memory-overflow/flowagent/pkg/llm"
@@ -51,6 +52,12 @@ func withStopGuard(ctx context.Context, taskID string) (context.Context, func())
 	}
 }
 
+// firstTokenTimeout 首 token 超时：从发起请求起，这么长时间没收到首个增量
+// 就判定卡死，中断请求返回 error 交由上层重试（maxRetries），而不是一路挂到
+// 外层看门狗。一旦首 token 到达就解除，后续生成时长不再受此约束（由空闲超时 +
+// 看门狗兜底），因此不会误杀「首包很快、生成量很大」的长生成任务。
+const firstTokenTimeout = 5 * time.Minute
+
 // chatWithToolsStreaming 调 LLM，优先走流式。
 //
 // provider 实现了 llm.StreamClient（例如 openai/混元，stream=true 逐 token
@@ -76,15 +83,33 @@ func chatWithToolsStreaming(
 
 	sc, ok := client.(llm.StreamClient)
 	if !ok {
-		// 不支持流式：退回阻塞式，行为不变
+		// 不支持流式：无法探测首 token，退回阻塞式（外层看门狗兜底），行为不变
 		return client.ChatWithTools(guardCtx, messages, tools, choice, opts)
 	}
 
-	return sc.ChatWithToolsStream(guardCtx, messages, tools, choice, opts, func(d llm.StreamDelta) {
-		// 一个 delta 事件可同时携带文本增量与工具调用分片，但通常只有其一非空。
+	// 首 token 超时：用 cancel + timer 而非 context.WithTimeout，因为首 token
+	// 到达后要「解除」这个超时、放它继续生成 —— WithTimeout 一旦触发就永久取消。
+	startTime := time.Now()
+	callCtx, cancel := context.WithCancel(guardCtx)
+	defer cancel()
+	timer := time.AfterFunc(firstTokenTimeout, cancel)
+	defer timer.Stop()
+
+	var firstOnce sync.Once
+	var firstTokenAt time.Time
+
+	result, err := sc.ChatWithToolsStream(callCtx, messages, tools, choice, opts, func(d llm.StreamDelta) {
+		firstOnce.Do(func() {
+			timer.Stop() // 首 token 到了，解除首 token 超时
+			firstTokenAt = time.Now()
+		})
+		// 一个 delta 事件可同时携带文本增量、思考链增量与工具调用分片，但通常只有其一非空。
 		data := map[string]interface{}{}
 		if d.Text != "" {
 			data["text"] = d.Text
+		}
+		if d.Reasoning != "" {
+			data["reasoning"] = d.Reasoning
 		}
 		if d.ToolCallDelta != nil {
 			data["tool_call"] = map[string]interface{}{
@@ -105,4 +130,11 @@ func chatWithToolsStreaming(
 			Data:    data,
 		})
 	})
+	if err != nil {
+		return nil, err
+	}
+	if !firstTokenAt.IsZero() {
+		result.FirstTokenMs = firstTokenAt.Sub(startTime).Milliseconds()
+	}
+	return result, nil
 }

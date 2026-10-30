@@ -15,8 +15,10 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import type { ConversationWorkflow, WorkflowNode, TaskStatus } from '../types/api';
+import type { ConversationWorkflow, WorkflowNode, TaskStatus, AgentOutput, ToolCallRecord } from '../types/api';
+import { getWorkflowNodeDetail } from '../services/api';
 import Markdown from './Markdown';
+import ToolCalls from './ToolCalls';
 import { fmtTokens } from './ContextUsage';
 import DurationText, { useDurationTooltip } from './DurationText';
 import { useT, type Translate } from '../i18n';
@@ -463,19 +465,50 @@ interface WorkflowNodeDetailProps {
   onClose: () => void;
   /** 运行中子任务的实时思考过程（node_id -> 步骤列表），执行中 node.output 尚未写入时兜底展示 */
   liveThink?: Record<string, string[]>;
+  /** 运行中子任务的实时工具调用链（node_id -> 工具调用列表），与 liveThink 对称兜底展示 */
+  liveToolCalls?: Record<string, ToolCallRecord[]>;
+  /** 父工作流任务 ID（单节点重试用） */
+  workflowTaskId?: string;
+  /** 重试单个失败节点的回调（入参为 node_id 或子任务 task_id） */
+  onRetryNode?: (nodeId: string) => void;
 }
 
-export function WorkflowNodeDetail({ node, nodes, onClose, liveThink }: WorkflowNodeDetailProps) {
+export function WorkflowNodeDetail({ node, nodes, onClose, liveThink, liveToolCalls, workflowTaskId, onRetryNode }: WorkflowNodeDetailProps) {
   const t = useT();
+  // 详情接口已对节点 output 做摘要化（去掉 tool_calls / think 明细），这里点开节点时
+  // 按需拉取完整 output。fullOutput 为 null 表示未拉取或拉取失败（回退摘要）。
+  const [fullOutput, setFullOutput] = useState<AgentOutput | null>(null);
+  const [loadingOutput, setLoadingOutput] = useState(false);
+  // 同步防重复标记：React.StrictMode 开发模式下 effect 会 double-invoke，而
+  // setLoadingOutput(true) 在第二次 effect 执行前尚未 flush，loadingOutput 守卫
+  // 会失效导致 node-detail 被重复请求。ref 是同步的，首次请求发出即置位，
+  // 第二次 effect 命中直接 return。组件按 key=node_id 挂载，切节点即重置。
+  const requestedRef = useRef(false);
+  useEffect(() => {
+    if (requestedRef.current || loadingOutput || fullOutput || !node.output || !workflowTaskId) return;
+    // 已有完整明细（tool_calls 或 think_process 非空）→ 无需再拉
+    if (node.output.tool_calls?.length || node.output.think_process?.length) return;
+    requestedRef.current = true;
+    setLoadingOutput(true);
+    getWorkflowNodeDetail(workflowTaskId, node.node_id)
+      .then((res) => setFullOutput(res.data.data || node.output || null))
+      .catch(() => setFullOutput(node.output || null))
+      .finally(() => setLoadingOutput(false));
+  }, [node.node_id, workflowTaskId, node.output, loadingOutput, fullOutput]);
+  const output = fullOutput || node.output;
   const durationTip = useDurationTooltip();
   const nameOf = (id: string) => nodes.find((n) => n.node_id === id)?.name || id;
   const deps = node.depends_on || [];
   const dependents = nodes.filter((n) => (n.depends_on || []).includes(node.node_id));
   // 终态思考过程优先（落库最完整）；执行中退回实时重建的步骤
-  const finalThink = node.output?.think_process?.length
-    ? node.output.think_process
+  const finalThink = output?.think_process?.length
+    ? output.think_process
     : liveThink?.[node.node_id] || [];
-  const isLive = finalThink.length > 0 && !node.output?.think_process?.length;
+  const isLive = finalThink.length > 0 && !output?.think_process?.length;
+  // 终态工具调用链优先（落库最完整）；执行中退回实时重建的工具调用列表
+  const finalToolCalls = output?.tool_calls?.length
+    ? output.tool_calls
+    : liveToolCalls?.[node.node_id] || [];
   // 思考过程默认展开 —— 子任务的中间过程正是排查该节点执行情况的关键
   const [showThink, setShowThink] = useState(true);
 
@@ -491,6 +524,16 @@ export function WorkflowNodeDetail({ node, nodes, onClose, liveThink }: Workflow
         >
           {node.archived ? t('status.abandoned') : taskStatusLabel(t, node.status)}
         </span>
+        {!node.archived && (node.status === 4 || node.status === 6) && workflowTaskId && onRetryNode && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => onRetryNode(node.task_id || node.node_id)}
+            title={t('workflow.retryNodeTip')}
+          >
+            {t('workflow.retryNode')}
+          </button>
+        )}
         <button type="button" className="wf-detail-close" onClick={onClose} title={t('common.close')}>
           ×
         </button>
@@ -603,10 +646,19 @@ export function WorkflowNodeDetail({ node, nodes, onClose, liveThink }: Workflow
         )}
       </dl>
 
-      {node.output?.reply_text && (
+      {output?.reply_text && (
         <div className="wf-detail-output">
           <div className="wf-detail-output-label">{t('workflow.output')}</div>
-          <Markdown compact>{node.output.reply_text}</Markdown>
+          <Markdown compact>{output.reply_text}</Markdown>
+        </div>
+      )}
+
+      {finalToolCalls.length > 0 && (
+        <div className="wf-detail-output wf-detail-tool-calls">
+          <div className="wf-detail-output-label">
+            {t('workflow.toolCalls', { n: finalToolCalls.length })}
+          </div>
+          <ToolCalls calls={finalToolCalls} />
         </div>
       )}
 

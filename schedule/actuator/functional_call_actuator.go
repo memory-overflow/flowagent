@@ -38,6 +38,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/memory-overflow/flowagent/config"
 	"github.com/memory-overflow/flowagent/dao"
 	"github.com/memory-overflow/flowagent/model"
 	"github.com/memory-overflow/flowagent/pkg/llm"
@@ -90,6 +91,15 @@ const funcCallSystemPrompt = `你是一个能够使用工具的智能助手。
   简要说明你接下来要做什么（例如「我先搜索一下相关资料」「我读取该文件的内容」）。
 - summary 会展示给用户，让它理解你的行动意图；请写得具体、口语化，
   不要只重复工具名（尤其 run_command 这类，要说明执行的是什么命令、达到什么目的）。
+
+文件操作（重要）—— 读写改文件请用专用工具，不要用 run_command 拼命令：
+- 新建/整体覆盖文件 → write_file；对已有文件做精确修改 → edit_file
+  （str_replace 替换、insert 插入）；读取文件 → read_file；列目录 → list_dir；删除 → delete_path。
+- 严禁用 run_command 执行 sed -i / awk / echo > / cat <<EOF / tee / python 写文件 这类命令来
+  创建或修改文件：这类做法不受控（转义易错、编码易乱、失败难回滚），工具调用链对用户也不可读。
+- run_command 只用于真正需要「执行」的场景：编译、运行脚本/测试、git、包管理、探测环境等；
+  以及用 sed -n / grep 精确读取大文件的某一段（读全文优先 read_file）。
+- 修改文件前先 read_file 确认当前内容，再用 edit_file 精确改动，避免凭记忆整段重写、误伤无关部分。
 
 能查就别问（重要）：
 - 凡是可以用工具查到的客观信息（事实、数据、文件内容、网页资料、代码现状等），必须先调用工具查证，不要因为"信息不足"就反过来向用户提问。
@@ -858,6 +868,7 @@ func runExecutingLoop(
 		TotalTokens:      result.Usage.TotalTokens,
 		PromptTokens:     result.Usage.PromptTokens,
 		CompletionTokens: result.Usage.CompletionTokens,
+		FirstTokenMs:     result.FirstTokenMs,
 	}); err != nil {
 		log.Printf("[func-call-actuator][%s] finish turn %d error: %v", temp.TaskID, turn.ID, err)
 	}
@@ -885,9 +896,7 @@ func runExecutingLoop(
 			ToolCallRound:    round,
 		}
 	}
-	if hint.MaxToolCallRound <= 0 {
-		hint.MaxToolCallRound = model.DefaultMaxToolCallRound
-	}
+	hint.MaxToolCallRound = maxRound
 	hint.NeedToolCall = needToolCall
 	// 必须显式清零：规划期提交规划时置过 true，若沿用到执行期，
 	// 状态机会一直判「刚提交规划」而把任务反复拉回 functional_call_wait，永不收口。
@@ -952,12 +961,14 @@ func appendFinalRoundInstruction(messages []llm.Message, maxRound int) []llm.Mes
 func resolveLoopState(
 	ctx context.Context, taskID string, phase model.TaskPhase,
 ) (round, maxRound, consecutiveFails, repeatedCalls int) {
-	maxRound = model.DefaultMaxToolCallRound
+	settings := config.CurrentAgentSettings()
+	if phase == model.PhasePlanning {
+		maxRound = settings.PlannerMaxToolCallRounds
+	} else {
+		maxRound = settings.SingleAgentMaxToolCallRounds
+	}
 	if hint := container.GetTransitionStore().GetHint(taskID); hint != nil {
 		round = hint.ToolCallRound
-		if hint.MaxToolCallRound > 0 {
-			maxRound = hint.MaxToolCallRound
-		}
 		return round, maxRound, hint.ConsecutiveFailures, hint.RepeatedToolCallCount
 	}
 	return int(countToolCallRoundInPhase(ctx, taskID, phase)), maxRound, 0, 0
@@ -1129,7 +1140,7 @@ func buildToolCallRecord(t *model.TaskTurn) model.ToolCallRecord {
 	if t.Output != "" {
 		var o model.TurnToolOutput
 		if err := json.Unmarshal([]byte(t.Output), &o); err == nil {
-			rec.Output = o.Content
+			rec.Output = model.TruncateToolCallOutput(o.Content)
 		}
 	}
 	if t.ErrorMsg != "" && rec.Output == "" {

@@ -13,11 +13,12 @@ package stream
 import (
 	"bytes"
 	"encoding/json"
-	"log"
 	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/memory-overflow/flowagent/pkg/logger"
 )
 
 // internalEventPath server 侧接收内部事件的路由（见 handler/router.go）。
@@ -86,7 +87,7 @@ func (f *HTTPForwarder) Forward(ev Event) {
 	select {
 	case f.queue <- ev:
 	default:
-		log.Printf("[stream-forward] queue full, drop event %s (task %s)", ev.Type, ev.TaskID)
+		logger.Warnf("[stream-forward] queue full, drop event %s (task %s)", ev.Type, ev.TaskID)
 	}
 }
 
@@ -111,13 +112,13 @@ func (f *HTTPForwarder) run() {
 func (f *HTTPForwarder) send(ev Event) {
 	body, err := json.Marshal(ev)
 	if err != nil {
-		log.Printf("[stream-forward] marshal event %s failed: %v", ev.Type, err)
+		logger.Errorf("[stream-forward] marshal event %s failed: %v", ev.Type, err)
 		return
 	}
 
 	req, err := http.NewRequest(http.MethodPost, f.url, bytes.NewReader(body))
 	if err != nil {
-		log.Printf("[stream-forward] build request failed: %v", err)
+		logger.Errorf("[stream-forward] build request failed: %v", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -127,11 +128,12 @@ func (f *HTTPForwarder) send(ev Event) {
 
 	resp, err := f.client.Do(req)
 	if err != nil {
-		log.Printf("[stream-forward] post event %s (task %s) failed: %v", ev.Type, ev.TaskID, err)
+		// server 未就绪时会对每条事件都失败，属高频无意义日志，降到 debug。
+		logger.Debugf("[stream-forward] post event %s (task %s) failed: %v", ev.Type, ev.TaskID, err)
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("[stream-forward] post event %s (task %s) got status %d", ev.Type, ev.TaskID, resp.StatusCode)
+		logger.Warnf("[stream-forward] post event %s (task %s) got status %d", ev.Type, ev.TaskID, resp.StatusCode)
 	}
 }

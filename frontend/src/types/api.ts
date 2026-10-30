@@ -516,6 +516,11 @@ export interface SearchTestResult {
 export type DBDriver = 'mysql' | 'sqlite';
 
 /** 数据库连接配置（系统设置页编辑的对象） */
+export interface AgentSettings {
+  planner_max_tool_call_rounds: number;
+  single_agent_max_tool_call_rounds: number;
+}
+
 export interface DBConfig {
   driver: DBDriver;
   /** MySQL 地址 */

@@ -1,6 +1,8 @@
 package dao
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -76,9 +78,48 @@ func reloadLocked(cfg config.DatabaseConfig) error {
 	return nil
 }
 
+// slowQueryLogger 只记录慢查询与出错的 SQL，静默其余正常查询。
+//
+// 背景：默认 logger.Info 会把每条 SQL 都打出来，量太大淹没日志；而排查
+// list/detail 慢的根因，需要知道「哪条 SQL 慢、慢多少」。这里按耗时阈值
+// 过滤，只把慢查询和出错 SQL 打到日志，配合 Trace 的耗时定位热点。
+type slowQueryLogger struct {
+	logger.Interface
+	threshold time.Duration
+}
+
+func newSlowQueryLogger() *slowQueryLogger {
+	return &slowQueryLogger{
+		// 基类用 Silent：正常查询不打印，慢查询/错误由 Trace 自己打。
+		Interface: logger.Default.LogMode(logger.Silent),
+		threshold: 200 * time.Millisecond,
+	}
+}
+
+// Trace 每个 SQL 执行后都会被回调，这里按耗时/错误决定是否打印。
+func (l *slowQueryLogger) Trace(ctx context.Context, begin time.Time, fc func() (sql string, rowsAffected int64), err error) {
+	elapsed := time.Since(begin)
+	sql, rows := fc()
+	switch {
+	case err != nil && !errors.Is(err, gorm.ErrRecordNotFound):
+		log.Printf("[slow-query] ERR %s rows=%d err=%v sql=%s", elapsed, rows, err, truncateSQL(sql))
+	case elapsed >= l.threshold:
+		log.Printf("[slow-query] SLOW %s rows=%d sql=%s", elapsed, rows, truncateSQL(sql))
+	}
+}
+
+// truncateSQL 截断过长的 SQL，避免一条大 INSERT/IN 把日志打爆。
+func truncateSQL(sql string) string {
+	const maxLen = 400
+	if len(sql) > maxLen {
+		return sql[:maxLen] + "..."
+	}
+	return sql
+}
+
 // open 按驱动建立连接并完成连接池配置。
 func open(cfg config.DatabaseConfig) (*gorm.DB, string, error) {
-	gormCfg := &gorm.Config{Logger: logger.Default.LogMode(logger.Info)}
+	gormCfg := &gorm.Config{Logger: newSlowQueryLogger()}
 	drv := cfg.DriverName()
 
 	var dialector gorm.Dialector

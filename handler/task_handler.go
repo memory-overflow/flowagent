@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +15,51 @@ import (
 	"github.com/memory-overflow/flowagent/model"
 	"github.com/memory-overflow/flowagent/pkg/stream"
 )
+
+// ============================================================
+// 终态任务详情缓存
+// ============================================================
+
+// 终态任务的 task_output / think_process 不再变化，而前端对工作流页做 5s 轮询
+// 详情，每次重复读 DB 里 MB 级 task_output 并解析纯属浪费。只缓存终态任务；
+// running 任务实时变化，不走缓存。
+var (
+	detailCacheMu sync.RWMutex
+	detailCache   = map[string]taskDetailCacheEntry{}
+)
+
+type taskDetailCacheEntry struct {
+	detail   map[string]interface{}
+	cachedAt time.Time
+}
+
+const (
+	detailCacheTTL        = 10 * time.Minute
+	detailCacheMaxEntries = 1024
+)
+
+func getCachedTaskDetail(taskID string) (map[string]interface{}, bool) {
+	detailCacheMu.RLock()
+	e, ok := detailCache[taskID]
+	detailCacheMu.RUnlock()
+	if !ok || time.Since(e.cachedAt) > detailCacheTTL {
+		return nil, false
+	}
+	return e.detail, true
+}
+
+func setCachedTaskDetail(taskID string, detail map[string]interface{}) {
+	detailCacheMu.Lock()
+	defer detailCacheMu.Unlock()
+	if len(detailCache) >= detailCacheMaxEntries {
+		for k, e := range detailCache {
+			if time.Since(e.cachedAt) > detailCacheTTL {
+				delete(detailCache, k)
+			}
+		}
+	}
+	detailCache[taskID] = taskDetailCacheEntry{detail: detail, cachedAt: time.Now()}
+}
 
 // ============================================================
 // 请求结构体
@@ -36,6 +82,16 @@ func GetTaskDetail(ctx *gin.Context, req interface{}) (interface{}, error) {
 	r := req.(*GetTaskDetailRequest)
 
 	taskDAO := &dao.TaskDAO{}
+
+	// 终态任务详情稳定，先查缓存：命中则直接返回，跳过 MB 级 task_output 的
+	// 读取与解析。先用轻量查询拿 status（不读 longtext），避免「为省读取反而
+	// 先读了完整 task_output」。
+	if st, err := taskDAO.GetTaskStatusByID(ctx, r.TaskID); err == nil && st != nil && st.IsTerminal() {
+		if cached, ok := getCachedTaskDetail(r.TaskID); ok {
+			return cached, nil
+		}
+	}
+
 	task, err := taskDAO.GetTaskByID(ctx, r.TaskID)
 	if err != nil {
 		return nil, err
@@ -55,6 +111,11 @@ func GetTaskDetail(ctx *gin.Context, req interface{}) (interface{}, error) {
 				})
 			}
 		}
+	}
+
+	// 终态任务写入缓存，供后续轮询命中
+	if task.IsTerminal() {
+		setCachedTaskDetail(r.TaskID, detail)
 	}
 	return detail, nil
 }
@@ -289,6 +350,84 @@ func RetryTaskBinder() interface{} {
 	return &RetryTaskRequest{}
 }
 
+// RetryWorkflowNodeRequest 单节点重试请求
+type RetryWorkflowNodeRequest struct {
+	TaskID string `json:"task_id"` // 工作流任务 ID
+	NodeID string `json:"node_id"` // 要重试的节点（node_id 或子任务 task_id）
+}
+
+// RetryWorkflowNode 重试工作流里的单个失败节点及其下游，保留已完成的上游。
+//
+// 与 RetryTask（整工作流重试）不同：这里只重置用户指定的节点和它下游的
+// 节点，其他分支（包括不相关的失败节点）保持原样，由用户逐个处理。
+// 「从失败位置开始」的语义：已完成的上游节点不重跑。
+func RetryWorkflowNode(ctx *gin.Context, req interface{}) (interface{}, error) {
+	r := req.(*RetryWorkflowNodeRequest)
+	if r.TaskID == "" || r.NodeID == "" {
+		return nil, &APIError{Code: http.StatusBadRequest, Msg: "task_id 和 node_id 必填"}
+	}
+
+	taskDAO := &dao.TaskDAO{}
+	task, err := taskDAO.GetTaskByID(ctx, r.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, &APIError{Code: http.StatusNotFound, Msg: "任务不存在"}
+	}
+	if task.TaskType != model.TaskTypeWorkflow {
+		return nil, &APIError{Code: http.StatusBadRequest, Msg: "只能重试工作流任务的节点"}
+	}
+
+	// 乐观锁重试（与 RetryTask 同口径，防并发追加节点）
+	const maxRetryAttempts = 3
+	for attempt := 1; ; attempt++ {
+		cur, err := taskDAO.GetTaskByID(ctx, r.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		if cur == nil {
+			return nil, &APIError{Code: http.StatusNotFound, Msg: "任务不存在"}
+		}
+		var dag model.WorkflowOutputData
+		if cur.TaskOutput != "" {
+			if err := json.Unmarshal([]byte(cur.TaskOutput), &dag); err != nil {
+				return nil, &APIError{Code: http.StatusInternalServerError, Msg: "工作流 DAG 解析失败"}
+			}
+		}
+
+		progress, err := resetWorkflowNodeForRetry(&dag, r.NodeID)
+		if err != nil {
+			return nil, &APIError{Code: http.StatusBadRequest, Msg: err.Error()}
+		}
+		outJSON, err := json.Marshal(dag)
+		if err != nil {
+			return nil, err
+		}
+
+		err = taskDAO.RetryWorkflow(ctx, dao.RetryWorkflowParams{
+			TaskID:        r.TaskID,
+			Output:        string(outJSON),
+			Progress:      progress,
+			ExpectVersion: cur.DAGVersion,
+		})
+		if err == nil {
+			return nil, nil
+		}
+		if !errors.Is(err, dao.ErrWorkflowVersionConflict) {
+			return nil, err
+		}
+		if attempt >= maxRetryAttempts {
+			return nil, &APIError{Code: http.StatusConflict, Msg: "工作流正在被并发修改，请稍后重试"}
+		}
+	}
+}
+
+// RetryWorkflowNodeBinder 绑定 RetryWorkflowNode 请求参数
+func RetryWorkflowNodeBinder() interface{} {
+	return &RetryWorkflowNodeRequest{}
+}
+
 // retryConversationTask 重试一个对话任务：从失败发生的 stage 断点续跑。
 //
 // 不再清空旧 turn、也不再重置回规划期 —— 失败时 ActionFailed 已把 stage 保留在
@@ -350,6 +489,121 @@ func resetWorkflowNodesForRetry(dag *model.WorkflowOutputData) float64 {
 	return float64(completed) / float64(total) * 100.0
 }
 
+// resetWorkflowNodeForRetry 重置指定节点及其下游（依赖它的节点，含传递依赖），
+// 保留其余节点。返回重算后的进度。
+//
+// 与 resetWorkflowNodesForRetry 的区别：后者是「整工作流重试」——保留全部
+// 已完成节点、重置所有失败/未完成节点；本函数是「单节点重试」——只重置用户
+// 指定的那个节点和它的下游，其他分支（包括不相关的失败节点）保持原样，
+// 由用户逐个处理。「从失败位置开始」的语义由此实现：已完成的上游不重跑。
+func resetWorkflowNodeForRetry(dag *model.WorkflowOutputData, nodeID string) (float64, error) {
+	// 1. 定位目标节点的 NodeID（node_id 或子任务 task_id 均可）
+	targetNodeID := ""
+	for _, n := range dag.Nodes {
+		if n.NodeID == nodeID || n.TaskID == nodeID {
+			targetNodeID = n.NodeID
+			break
+		}
+	}
+	if targetNodeID == "" {
+		return 0, fmt.Errorf("节点不存在: %s", nodeID)
+	}
+
+	// 2. 计算下游集合（直接/间接依赖目标节点的节点），迭代到收敛
+	downstream := map[string]bool{targetNodeID: true}
+	for changed := true; changed; {
+		changed = false
+		for _, n := range dag.Nodes {
+			if downstream[n.NodeID] {
+				continue
+			}
+			for _, dep := range n.DependsOn {
+				if downstream[dep] {
+					downstream[n.NodeID] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+
+	// 3. 重置目标节点 + 下游，保留其余（含已完成上游与其他分支）
+	total := dag.ActiveNodeCount()
+	if total == 0 {
+		return 0, nil
+	}
+	completed := 0
+	for i := range dag.Nodes {
+		n := &dag.Nodes[i]
+		if n.Archived {
+			continue
+		}
+		if downstream[n.NodeID] {
+			n.Status = model.TaskStatusQueued
+			n.TaskID = ""
+			n.Output = nil
+			continue
+		}
+		if n.Status == model.TaskStatusCompleted {
+			completed++
+		}
+	}
+	return float64(completed) / float64(total) * 100.0, nil
+}
+
+// ============================================================
+// GetTasksStatus — 批量任务状态查询（前端轮询用，轻量）
+// ============================================================
+//
+// 供对话页/工作流页轮询判断「哪些任务已终态」使用。相比逐个 GetTaskDetail
+// （每次读完整 task_output + 重建 think_process），本接口一次查一批、只投影
+// 轻量状态列，避免轮询把大字段反复拉进内存。
+
+// GetTasksStatusRequest 批量状态查询请求
+type GetTasksStatusRequest struct {
+	TaskIDs []string `json:"task_ids"`
+}
+
+// GetTasksStatusBinder 绑定
+func GetTasksStatusBinder() interface{} {
+	return &GetTasksStatusRequest{}
+}
+
+// GetTasksStatus 批量查询任务状态（不含 output 详情）。
+func GetTasksStatus(ctx *gin.Context, req interface{}) (interface{}, error) {
+	r := req.(*GetTasksStatusRequest)
+	if len(r.TaskIDs) == 0 {
+		return nil, &APIError{Code: http.StatusBadRequest, Msg: "task_ids 不能为空"}
+	}
+	taskDAO := &dao.TaskDAO{}
+	tasks, err := taskDAO.GetTaskStatusBatch(ctx, r.TaskIDs)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]gin.H, 0, len(tasks))
+	for _, t := range tasks {
+		if t == nil {
+			continue
+		}
+		items = append(items, gin.H{
+			"task_id":       t.TaskID,
+			"task_type":     int(t.TaskType),
+			"status":        int(t.Status),
+			"status_name":   taskStatusName(t.Status),
+			"stage":         t.Stage,
+			"stage_name":    model.TaskStage(t.Stage).String(),
+			"phase":         t.Phase,
+			"phase_name":    model.TaskPhase(t.Phase).String(),
+			"progress":      t.Progress,
+			"turn_count":    t.TurnCount,
+			"start_ts":      timeOrZero(t.StartTime),
+			"end_ts":        timeOrZero(t.EndTime),
+			"failed_reason": t.FailedReason.Data,
+		})
+	}
+	return gin.H{"list": items}, nil
+}
+
 // ============================================================
 // ListTaskTurns — 调试页面用：拉取任务所有 turn
 // ============================================================
@@ -362,6 +616,86 @@ type ListTaskTurnsRequest struct {
 // ListTaskTurnsBinder 绑定
 func ListTaskTurnsBinder() interface{} {
 	return &ListTaskTurnsRequest{}
+}
+
+// GetTurnDetailRequest 单条 turn 详情请求
+type GetTurnDetailRequest struct {
+	TaskID  string `json:"task_id"`
+	TurnSeq int32  `json:"turn_seq"`
+}
+
+// GetTurnDetail 拉取单条 turn 的完整内容（含 input/output 大字段）。
+// 调试页默认只加载 turn 元信息列表，点开某条 turn 时再调本接口拉完整 payload，
+// 避免列表一次传输 MB 级历史（每条 turn 的 input 都含完整 system prompt + 历史）。
+func GetTurnDetail(ctx *gin.Context, req interface{}) (interface{}, error) {
+	r := req.(*GetTurnDetailRequest)
+	if r.TaskID == "" {
+		return nil, &APIError{Code: http.StatusBadRequest, Msg: "task_id 必填"}
+	}
+	turnDAO := &dao.TaskTurnDAO{}
+	turn, err := turnDAO.GetTurnBySeq(ctx, r.TaskID, r.TurnSeq)
+	if err != nil {
+		return nil, err
+	}
+	if turn == nil {
+		return nil, &APIError{Code: http.StatusNotFound, Msg: "turn 不存在"}
+	}
+	return buildTurnDebugView(turn, "", true), nil
+}
+
+// GetTurnDetailBinder 绑定 GetTurnDetail 请求参数
+func GetTurnDetailBinder() interface{} {
+	return &GetTurnDetailRequest{}
+}
+
+// GetWorkflowNodeDetailRequest 工作流节点详情请求
+type GetWorkflowNodeDetailRequest struct {
+	TaskID string `json:"task_id"` // 工作流任务 ID
+	NodeID string `json:"node_id"` // 节点 id
+}
+
+// GetWorkflowNodeDetail 拉取工作流单个节点的完整 output（含 tool_calls / think 明细）。
+// 工作流详情接口已对节点 output 做摘要化（见 summarizeNodeOutputForDetail），
+// 前端节点详情面板点开时经本接口单独拉完整内容。
+func GetWorkflowNodeDetail(ctx *gin.Context, req interface{}) (interface{}, error) {
+	r := req.(*GetWorkflowNodeDetailRequest)
+	if r.TaskID == "" || r.NodeID == "" {
+		return nil, &APIError{Code: http.StatusBadRequest, Msg: "task_id 和 node_id 必填"}
+	}
+
+	taskDAO := &dao.TaskDAO{}
+	task, err := taskDAO.GetTaskByID(ctx, r.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, &APIError{Code: http.StatusNotFound, Msg: "任务不存在"}
+	}
+	if task.TaskType != model.TaskTypeWorkflow {
+		return nil, &APIError{Code: http.StatusBadRequest, Msg: "只能查询工作流任务的节点"}
+	}
+
+	var dag model.WorkflowOutputData
+	if task.TaskOutput != "" {
+		if err := json.Unmarshal([]byte(task.TaskOutput), &dag); err != nil {
+			return nil, &APIError{Code: http.StatusInternalServerError, Msg: "工作流 DAG 解析失败"}
+		}
+	}
+	for _, n := range dag.Nodes {
+		if n.NodeID != r.NodeID {
+			continue
+		}
+		if n.Output != nil {
+			trimDetailToolCallOutputs(n.Output)
+		}
+		return n.Output, nil
+	}
+	return nil, &APIError{Code: http.StatusNotFound, Msg: "节点不存在"}
+}
+
+// GetWorkflowNodeDetailBinder 绑定 GetWorkflowNodeDetail 请求参数
+func GetWorkflowNodeDetailBinder() interface{} {
+	return &GetWorkflowNodeDetailRequest{}
 }
 
 // TurnDebugView 单条 turn 的调试视图（前端友好格式）
@@ -410,6 +744,8 @@ type TurnDebugView struct {
 	StartTs          int64       `json:"start_ts"`
 	EndTs            int64       `json:"end_ts"`
 	TimeCostMs       int64       `json:"time_cost_ms"`
+	// FirstTokenMs 首 token 耗时（毫秒）。仅流式 LLM 调用有值，其余为 0。
+	FirstTokenMs     int64       `json:"first_token_ms"`
 	// SubTaskID 由该 turn 派生的子任务 task_id（如 deep_search 子任务）。
 	// 调试页把它放在 turn 行尾部作为子任务调试入口；老数据无映射时为空。
 	SubTaskID string `json:"sub_task_id,omitempty"`
@@ -437,7 +773,9 @@ func buildTaskTurnsSnapshot(ctx context.Context, taskID string) (gin.H, error) {
 	}
 
 	turnDAO := &dao.TaskTurnDAO{}
-	turns, err := turnDAO.ListTurnsByTaskID(ctx, taskID)
+	// 列表视图用轻量查询：不加载 input/output 大字段，避免一次拉 MB 级历史。
+	// 完整 payload 由 GetTurnDetail 按需拉取。
+	turns, err := turnDAO.ListTurnsByTaskIDLight(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -451,7 +789,7 @@ func buildTaskTurnsSnapshot(ctx context.Context, taskID string) (gin.H, error) {
 	//
 	// 兼容旧数据：改动前跑完的子任务没写 parent_turn_id，无法挂到 turn 行，
 	// 退回顶层 unmapped_sub_tasks 列表兜底展示，避免入口完全消失。
-	subTasks, _ := taskDAO.ListSubTasksByParent(ctx, taskID)
+	subTasks, _ := taskDAO.ListSubTasksByParentLight(ctx, taskID)
 	turnToSubTask := make(map[int64]string, len(subTasks))
 	unmappedSubTasks := make([]gin.H, 0)
 	for _, st := range subTasks {
@@ -470,7 +808,7 @@ func buildTaskTurnsSnapshot(ctx context.Context, taskID string) (gin.H, error) {
 
 	views := make([]*TurnDebugView, 0, len(turns))
 	for _, t := range turns {
-		views = append(views, buildTurnDebugView(t, turnToSubTask[t.ID]))
+		views = append(views, buildTurnDebugView(t, turnToSubTask[t.ID], false))
 	}
 
 	// 任务摘要：抽到 buildTaskDebugSummary 里供 ListSubTasks 复用
@@ -544,7 +882,6 @@ func buildTaskDebugSummary(
 		"completion_tokens": breakdown.CompletionTokens,
 		"input_text":        inputText,
 		"failed_reason":     task.FailedReason.Data,
-		"output_text":       task.TaskOutput,
 		// 子任务专属标记：deep_search 子任务用 SubTaskKind=SubTaskKindDeepSearch
 		// 区分于普通 workflow 节点子任务，前端可据此染色或加图标。
 		// SubTaskKind 写在 TaskInputData 里，Task 本体无该字段。
@@ -608,7 +945,7 @@ func ListSubTasks(ctx *gin.Context, req interface{}) (interface{}, error) {
 		return nil, &APIError{Code: http.StatusNotFound, Msg: "父任务不存在"}
 	}
 
-	subTasks, err := taskDAO.ListSubTasksByParent(ctx, r.ParentTaskID)
+	subTasks, err := taskDAO.ListSubTasksByParentLight(ctx, r.ParentTaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -627,7 +964,7 @@ func ListSubTasks(ctx *gin.Context, req interface{}) (interface{}, error) {
 	}, nil
 }
 
-func buildTurnDebugView(t *model.TaskTurn, subTaskID string) *TurnDebugView {
+func buildTurnDebugView(t *model.TaskTurn, subTaskID string, includePayload bool) *TurnDebugView {
 	v := &TurnDebugView{
 		ID:               t.ID,
 		TaskID:           t.TaskID,
@@ -652,13 +989,19 @@ func buildTurnDebugView(t *model.TaskTurn, subTaskID string) *TurnDebugView {
 		ErrorMsg:         t.ErrorMsg,
 		StartTs:          t.StartTime.UnixMilli(),
 		TimeCostMs:       t.TimeCostMs,
-		InputRaw:         t.Input,
-		OutputRaw:        t.Output,
+		FirstTokenMs:     t.FirstTokenMs,
 		SubTaskID:        subTaskID,
 	}
 	if t.EndTime != nil {
 		v.EndTs = t.EndTime.UnixMilli()
 	}
+	// 列表视图不加载 payload（input/output 大字段），只返回元信息；
+	// 完整 payload 由 GetTurnDetail 按需拉取，避免调试页一次传输 MB 级历史。
+	if !includePayload {
+		return v
+	}
+	v.InputRaw = t.Input
+	v.OutputRaw = t.Output
 	// 尝试把 JSON 解开，方便前端直接渲染
 	if t.Input != "" {
 		var obj interface{}

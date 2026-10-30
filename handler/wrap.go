@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/memory-overflow/flowagent/pkg/logger"
 )
 
 // CommonResponse 统一响应结构
@@ -60,11 +61,11 @@ func Wrap(binder BinderFunc, handler HandlerFunc) gin.HandlerFunc {
 			}
 		}
 
-		// 打印请求
+		// 打印请求（debug 级：完整请求体较啰嗦，默认级别不输出）
 		if reqBytes, err := json.Marshal(req); err == nil {
-			log.Printf("[handler][%s] path=%s req=%s", reqID, path, string(reqBytes))
+			logger.Debugf("[handler][%s] path=%s req=%s", reqID, path, string(reqBytes))
 		} else {
-			log.Printf("[handler][%s] path=%s req=<marshal err: %v>", reqID, path, err)
+			logger.Debugf("[handler][%s] path=%s req=<marshal err: %v>", reqID, path, err)
 		}
 
 		// 执行 handler
@@ -81,11 +82,11 @@ func Wrap(binder BinderFunc, handler HandlerFunc) gin.HandlerFunc {
 			return
 		}
 
-		// 打印响应
+		// 打印响应（debug 级：完整响应体较啰嗦，默认级别不输出）
 		if rspBytes, mErr := json.Marshal(resp); mErr == nil {
-			log.Printf("[handler][%s] path=%s rsp=%s", reqID, path, string(rspBytes))
+			logger.Debugf("[handler][%s] path=%s rsp=%s", reqID, path, string(rspBytes))
 		} else {
-			log.Printf("[handler][%s] path=%s rsp=<marshal err: %v>", reqID, path, mErr)
+			logger.Debugf("[handler][%s] path=%s rsp=<marshal err: %v>", reqID, path, mErr)
 		}
 
 		c.JSON(http.StatusOK, CommonResponse{

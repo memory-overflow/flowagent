@@ -155,6 +155,9 @@ type ChatResult struct {
 	Reasoning string
 	// Usage token 消耗。provider 不支持时为零值。
 	Usage Usage
+	// FirstTokenMs 首 token 耗时（毫秒）：从发起请求到收到首个有内容的增量。
+	// 仅流式 provider 记录；非流式（聚合返回）或无内容输出时为 0。
+	FirstTokenMs int64
 }
 
 // Client LLM 客户端接口。所有 provider 必须实现。
@@ -171,10 +174,13 @@ type Client interface {
 // StreamDelta 流式输出的一段增量。
 //
 // Text 承载文本增量（服务于「最终回答文本」的逐 token 展示）。
+// Reasoning 承载思考链增量（推理模型的 reasoning_content，供调试页观察原始思考链）。
 // ToolCallDelta 承载工具调用分片增量（服务于调试页观察「完整的 raw 流式输出」）。
-// 两者在一次回调中通常只有一个非空：模型要么在吐文本，要么在吐工具调用分片。
+// 三者在一次回调中通常只有一个非空：模型要么在吐文本，要么在吐思考，要么在吐工具调用分片。
 type StreamDelta struct {
 	Text string // 增量文本（本轮为空说明没有新文本，例如纯工具调用轮次）
+	// Reasoning 思考链增量（本轮为空说明没有新思考，非推理模型始终为空）。
+	Reasoning string
 	// ToolCallDelta 本轮的工具调用分片；本轮没有工具调用分片时为 nil。
 	ToolCallDelta *ToolCallDelta
 }

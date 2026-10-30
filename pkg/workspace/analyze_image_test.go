@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestAnalyzeImageToolMeta 校验图片理解工具的元信息：名字与必填 path 参数。
@@ -16,6 +17,9 @@ func TestAnalyzeImageToolMeta(t *testing.T) {
 	}
 	if def.Name != "analyze_image" {
 		t.Errorf("工具名应为 analyze_image, got %s", def.Name)
+	}
+	if def.Timeout != 15*time.Minute {
+		t.Errorf("工具超时应与 functional call 对齐为 15 分钟, got %s", def.Timeout)
 	}
 	props, _ := def.InputSchema["properties"].(map[string]interface{})
 	if props == nil {

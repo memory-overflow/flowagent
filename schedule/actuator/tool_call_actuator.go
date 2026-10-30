@@ -29,7 +29,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/memory-overflow/flowagent/config"
 	"github.com/memory-overflow/flowagent/dao"
 	"github.com/memory-overflow/flowagent/model"
 	"github.com/memory-overflow/flowagent/pkg/llm"
@@ -107,8 +109,13 @@ func toolCallImpl(ctx context.Context, task *framework.Task) (data interface{}, 
 	if container.GetTransitionStore().GetHint(temp.TaskID) == nil {
 		phase := taskPhaseOf(temp)
 		if round, err := toolCallRegistry.turnDAO.CountToolCallRoundsByPhase(ctx, temp.TaskID, phase); err == nil {
+			settings := config.CurrentAgentSettings()
+			maxRound := settings.SingleAgentMaxToolCallRounds
+			if phase == model.PhasePlanning {
+				maxRound = settings.PlannerMaxToolCallRounds
+			}
 			container.GetTransitionStore().SetHint(temp.TaskID, &model.StageTransitionHint{
-				MaxToolCallRound: model.DefaultMaxToolCallRound,
+				MaxToolCallRound: maxRound,
 				ToolCallRound:    int(round),
 			})
 			log.Printf("[tool-call-actuator][%s] hint recovered from DB: round=%d (phase=%s)",
@@ -149,7 +156,7 @@ func toolCallImpl(ctx context.Context, task *framework.Task) (data interface{}, 
 	// 因此这里 resolve 出的 client 一定对应多模态模型；失败只降级（该工具
 	// 调用会报错回喂 LLM），不阻断整批工具执行。
 	var visionAnalyzer workspacepkg.VisionAnalyzerFunc
-	if llmClient, rErr := resolveLLMClientWith(ctx, temp.ChatID, toolCallRegistry.llmResolver, toolCallRegistry.convDAO); rErr != nil {
+	if llmClient, rErr := resolveVisionLLMClient(ctx, temp.ChatID, toolCallRegistry.llmResolver, toolCallRegistry.convDAO); rErr != nil {
 		log.Printf("[tool-call-actuator][%s] resolve llm client for vision failed: %v", temp.TaskID, rErr)
 	} else if llmClient != nil {
 		visionAnalyzer = buildVisionAnalyzer(llmClient)
@@ -224,12 +231,14 @@ func toolCallImpl(ctx context.Context, task *framework.Task) (data interface{}, 
 
 	hint := store.GetHint(temp.TaskID)
 
-	round, maxRound := 0, model.DefaultMaxToolCallRound
+	settings := config.CurrentAgentSettings()
+	maxRound := settings.SingleAgentMaxToolCallRounds
+	if taskPhaseOf(temp) == model.PhasePlanning {
+		maxRound = settings.PlannerMaxToolCallRounds
+	}
+	round := 0
 	if hint != nil {
 		round = hint.ToolCallRound
-		if hint.MaxToolCallRound > 0 {
-			maxRound = hint.MaxToolCallRound
-		}
 	}
 	log.Printf("[tool-call-actuator][%s] %d/%d tool(s) executed (%d failed), round %d/%d → functional_call",
 		temp.TaskID, executed, len(pending), failed, round, maxRound)
@@ -554,6 +563,29 @@ func runToolEntry(
 	default:
 		return "", false, nil, fmt.Errorf("unknown tool kind for %s", call.Name)
 	}
+}
+
+// visionLLMTimeout 与调度器 functionalCallTimeout 保持一致，但仅作用于
+// analyze_image 的多模态请求，不改变普通对话和工作流子任务的 provider 超时。
+const visionLLMTimeout = 15 * time.Minute
+
+func resolveVisionLLMClient(
+	ctx context.Context, chatID string, resolver *llmreg.Resolver, convDAO *dao.ConversationDAO,
+) (llm.Client, error) {
+	if resolver == nil {
+		return nil, fmt.Errorf("llm resolver not initialized")
+	}
+	modelID := ""
+	if convDAO != nil {
+		conv, err := convDAO.GetConversationByID(ctx, chatID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve vision llm client: get conversation: %w", err)
+		}
+		if conv != nil {
+			modelID = conv.ModelID
+		}
+	}
+	return resolver.ResolveWithTimeout(ctx, modelID, visionLLMTimeout)
 }
 
 // buildVisionAnalyzer 构造图片理解回调：analyze_image 工具执行时调用当前

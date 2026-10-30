@@ -160,6 +160,8 @@ type FinishTurnParams struct {
 	PromptTokens int
 	// CompletionTokens 输出 token
 	CompletionTokens int
+	// FirstTokenMs 首 token 耗时（毫秒）。仅流式 LLM 调用回传，其余为 0。
+	FirstTokenMs int64
 }
 
 // tokenUsage 从参数里取出三元组（LLM 调用），非 LLM 调用返回零值
@@ -177,7 +179,7 @@ func (d *TaskTurnDAO) FinishTurn(ctx context.Context, turnID int64, p FinishTurn
 	if err != nil {
 		return fmt.Errorf("finish turn: marshal output: %w", err)
 	}
-	return d.closeTurn(ctx, turnID, model.TurnStatusSuccess, outputJSON, "", p.tokenUsage())
+	return d.closeTurn(ctx, turnID, model.TurnStatusSuccess, outputJSON, "", p.tokenUsage(), p.FirstTokenMs)
 }
 
 // FailTurn 标记 turn 失败，回填错误原因与耗时。
@@ -195,7 +197,7 @@ func (d *TaskTurnDAO) FailTurn(ctx context.Context, turnID int64, reason error, 
 	if reason != nil {
 		msg = reason.Error()
 	}
-	return d.closeTurn(ctx, turnID, model.TurnStatusFailed, outputJSON, msg, extractTurnTokens(output))
+	return d.closeTurn(ctx, turnID, model.TurnStatusFailed, outputJSON, msg, extractTurnTokens(output), 0)
 }
 
 // turnTokens 一次 turn 的 token 消耗三元组。
@@ -238,7 +240,7 @@ func extractTurnTokens(output interface{}) turnTokens {
 // closeTurn 收尾一个 turn：写状态、输出、错误、耗时与 token 消耗
 func (d *TaskTurnDAO) closeTurn(
 	ctx context.Context, turnID int64,
-	status model.TurnStatus, outputJSON, errMsg string, tokens turnTokens,
+	status model.TurnStatus, outputJSON, errMsg string, tokens turnTokens, firstTokenMs int64,
 ) error {
 	db := d.getDB().WithContext(ctx)
 
@@ -272,6 +274,9 @@ func (d *TaskTurnDAO) closeTurn(
 	}
 	if tokens.completion > 0 {
 		updates["completion_tokens"] = tokens.completion
+	}
+	if firstTokenMs > 0 {
+		updates["first_token_ms"] = firstTokenMs
 	}
 
 	if err := db.Model(&model.TaskTurn{}).Where("id = ?", turnID).Updates(updates).Error; err != nil {
@@ -316,35 +321,65 @@ func (d *TaskTurnDAO) ListTurnsByTaskIDForThink(ctx context.Context, taskID stri
 		return nil, fmt.Errorf("list turns by task_id (light): %w", err)
 	}
 
-	// 收集 LLM 调用的主键，单独回填其 output（小字段）。
-	var llmIDs []int64
+	// LLM output 用于重建思考过程；工具 output 用于执行中实时展示工具调用链。
+	// 其它 turn 的大 output 仍不加载，避免轮询详情时无谓放大响应。
+	var outputIDs []int64
 	for _, t := range turns {
-		if t.TurnType.IsLLMCall() {
-			llmIDs = append(llmIDs, t.ID)
+		if t.TurnType.IsLLMCall() || t.TurnType == model.TurnTypeToolCall {
+			outputIDs = append(outputIDs, t.ID)
 		}
 	}
-	if len(llmIDs) > 0 {
+	if len(outputIDs) > 0 {
 		var outs []struct {
 			ID     int64
 			Output string
 		}
 		if err := db.Model(&model.TaskTurn{}).
-			Where("id IN ?", llmIDs).
+			Where("id IN ?", outputIDs).
 			Select("id", "output").
 			Find(&outs).Error; err != nil {
-			return nil, fmt.Errorf("backfill llm output: %w", err)
+			return nil, fmt.Errorf("backfill turn output: %w", err)
 		}
 		outputByID := make(map[int64]string, len(outs))
 		for _, o := range outs {
 			outputByID[o.ID] = o.Output
 		}
 		for _, t := range turns {
-			if t.TurnType.IsLLMCall() {
+			if t.TurnType.IsLLMCall() || t.TurnType == model.TurnTypeToolCall {
 				t.Output = outputByID[t.ID]
 			}
 		}
 	}
 	return model.NormalizeTurns(turns), nil
+}
+
+// ListTurnsByTaskIDLight 返回任务的 turn 列表，但不加载 input/output 大字段。
+//
+// 供 /tasks/turns 调试列表接口使用：列表只展示元信息（turn 序号、工具名、耗时、
+// token 等），完整 input/output 由用户点开某条 turn 时经 GetTurnBySeq 单独拉。
+// 与 ListTurnsByTaskIDForThink 不同：后者只为 think_process 服务，这里面向调试页。
+func (d *TaskTurnDAO) ListTurnsByTaskIDLight(ctx context.Context, taskID string) ([]*model.TaskTurn, error) {
+	db := d.getDB().WithContext(ctx)
+	var turns []*model.TaskTurn
+	if err := db.Omit("Input", "Output").
+		Where("task_id = ?", taskID).
+		Order("turn_seq ASC").Find(&turns).Error; err != nil {
+		return nil, fmt.Errorf("list turns by task_id (light): %w", err)
+	}
+	return model.NormalizeTurns(turns), nil
+}
+
+// GetTurnBySeq 加载单条 turn 的完整内容（含 input/output 大字段）。
+func (d *TaskTurnDAO) GetTurnBySeq(ctx context.Context, taskID string, turnSeq int32) (*model.TaskTurn, error) {
+	db := d.getDB().WithContext(ctx)
+	var turn model.TaskTurn
+	if err := db.Where("task_id = ? AND turn_seq = ?", taskID, turnSeq).First(&turn).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get turn by seq: %w", err)
+	}
+	return &turn, nil
 }
 
 // ListTurnsByChatID 按对话维度返回所有 turn（用于对话级回溯）

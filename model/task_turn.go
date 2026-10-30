@@ -229,6 +229,11 @@ type TurnMessage struct {
 type TurnLLMOutput struct {
 	// Text 模型返回的纯文本
 	Text string `json:"text,omitempty"`
+	// Reasoning 推理模型的思考链原始内容（reasoning_content）。
+	//
+	// 与 Text 相互独立：推理模型先吐思考链再吐正文，两者都要落库，
+	// 调试页据此还原「模型到底想了什么」。非推理模型为空。
+	Reasoning string `json:"reasoning,omitempty"`
 	// ToolCalls 模型请求的工具调用列表
 	ToolCalls []TurnToolCallReq `json:"tool_calls,omitempty"`
 	// PromptTokens / CompletionTokens / TotalTokens token 消耗
@@ -363,6 +368,9 @@ type TaskTurn struct {
 	EndTime *time.Time `gorm:"column:end_time"`
 	// TimeCostMs 耗时（毫秒）
 	TimeCostMs int64 `gorm:"column:time_cost_ms;not null;default:0"`
+	// FirstTokenMs 首 token 耗时（毫秒）：从调用开始到收到首个有内容的增量。
+	// 仅流式 LLM 调用记录（阻塞式/聚合返回的 provider 无法探测，恒为 0）。
+	FirstTokenMs int64 `gorm:"column:first_token_ms;not null;default:0"`
 	// CreatedAt 记录创建时间
 	CreatedAt time.Time `gorm:"column:created_time;not null;index:idx_turn_chat_created,priority:2"`
 	// UpdatedAt 记录更新时间

@@ -17,6 +17,7 @@ package skill
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -66,70 +67,88 @@ func DetectDangerousCommand(input string) string {
 }
 
 // detectDangerousCommand 检测 input 中的危险删除命令。
-// 命中返回拦截原因，否则返回空串。当前拦截两类：
-//  1. rm 递归强制删除（rm -rf / -fr / -Rf / -r -f / --recursive --force 等变体）
-//  2. rm 删除系统根 / 家 / 关键目录等危险路径
+// 命中返回拦截原因，否则返回空串。安全判断基于 rm 的实际删除目标，普通目录
+// 即使使用 -rf 也允许；文件系统根、家目录和关键系统路径仍会被拦截。
 func detectDangerousCommand(input string) string {
 	for _, m := range rmCmdRe.FindAllStringSubmatch(input, -1) {
 		if len(m) < 2 {
 			continue
 		}
-		args := m[1]
-		if rmHasRecursiveForce(args) {
-			return fmt.Sprintf("检测到 rm 递归强制删除（%s），防止误删系统/关键文件", strings.TrimSpace(m[0]))
-		}
-		if rmTargetsDangerousPath(args) {
-			return fmt.Sprintf("检测到 rm 删除危险路径（%s），防止误删系统/关键文件", strings.TrimSpace(m[0]))
+		for _, target := range rmTargets(m[1]) {
+			if reason := DetectDangerousDeleteTarget(target); reason != "" {
+				return fmt.Sprintf("检测到 rm 删除危险目标 %q（%s）", target, reason)
+			}
 		}
 	}
 	return ""
 }
 
-// rmHasRecursiveForce 判断 rm 参数里是否同时出现递归(r/R/--recursive)与强制(f/F/--force)标志。
-func rmHasRecursiveForce(args string) bool {
-	hasRecursive, hasForce := false, false
-	for _, tok := range strings.Fields(args) {
-		if tok == "--recursive" {
-			hasRecursive = true
-			continue
-		}
-		if tok == "--force" {
-			hasForce = true
-			continue
-		}
-		if strings.HasPrefix(tok, "-") && !strings.HasPrefix(tok, "--") {
-			for _, ch := range tok[1:] {
-				switch ch {
-				case 'r', 'R':
-					hasRecursive = true
-				case 'f', 'F':
-					hasForce = true
-				}
+// rmTargets 从 rm 参数中提取删除目标。rm 的短/长选项均跳过，-- 之后全部视为目标。
+func rmTargets(args string) []string {
+	fields := strings.Fields(args)
+	targets := make([]string, 0, len(fields))
+	optionsDone := false
+	for _, field := range fields {
+		if !optionsDone {
+			if field == "--" {
+				optionsDone = true
+				continue
+			}
+			if strings.HasPrefix(field, "-") && field != "-" {
+				continue
 			}
 		}
+		targets = append(targets, field)
 	}
-	return hasRecursive && hasForce
+	return targets
 }
 
-// dangerousPaths 危险删除目标路径前缀（防止误删系统/关键目录）。
-var dangerousPaths = []string{
-	"/", "/*", "~", "$HOME", "~/",
-	"/home", "/root", "/etc", "/usr", "/var",
-	"/bin", "/sbin", "/lib", "/boot", "/System",
-	"/Applications", "/opt", "/dev", "/proc", "/sys",
+// dangerousDeleteRoots 是禁止删除的关键系统目录。命中目录本身或其后代都会拦截。
+var dangerousDeleteRoots = []string{
+	"/etc", "/usr", "/var", "/bin", "/sbin", "/lib", "/boot",
+	"/System", "/Applications", "/opt", "/dev", "/proc", "/sys",
+	"/home", "/root",
 }
 
-// rmTargetsDangerousPath 判断 rm 参数里是否包含危险路径目标。
-func rmTargetsDangerousPath(args string) bool {
-	for _, tok := range strings.Fields(args) {
-		tok = strings.Trim(tok, `"'=`)
-		for _, p := range dangerousPaths {
-			if tok == p || strings.HasPrefix(tok, p+"/") {
-				return true
-			}
+// DetectDangerousDeleteTarget 判断单个删除目标是否属于根、根通配、家目录或关键
+// 系统路径。native delete_path 与 run_command 共用此函数，避免两条删除通道策略漂移。
+func DetectDangerousDeleteTarget(target string) string {
+	raw := strings.Trim(strings.TrimSpace(target), `"'`)
+	if raw == "" {
+		return ""
+	}
+
+	// shell 尚未展开的家目录/环境变量写法必须先拦截。
+	upper := strings.ToUpper(raw)
+	if raw == "~" || strings.HasPrefix(raw, "~/") || upper == "$HOME" ||
+		strings.HasPrefix(upper, "$HOME/") || upper == "${HOME}" || strings.HasPrefix(upper, "${HOME}/") {
+		return "目标位于用户家目录"
+	}
+
+	// 根目录通配在 filepath.Clean 前判断；覆盖 /*、/.*、/** 等变体。
+	if strings.HasPrefix(raw, "/") {
+		withoutSlashes := strings.TrimLeft(raw, "/")
+		if withoutSlashes != "" && strings.Trim(withoutSlashes, "*?.[]{}") == "" {
+			return "目标是文件系统根通配"
 		}
 	}
-	return false
+
+	clean := filepath.Clean(raw)
+	if clean == "/" {
+		return "目标是文件系统根目录"
+	}
+	for _, root := range dangerousDeleteRoots {
+		if clean == root || strings.HasPrefix(clean, root+string(filepath.Separator)) {
+			return "目标位于关键系统路径 " + root
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		home = filepath.Clean(home)
+		if clean == home || strings.HasPrefix(clean, home+string(filepath.Separator)) {
+			return "目标位于用户家目录"
+		}
+	}
+	return ""
 }
 
 // ============================================================

@@ -95,6 +95,7 @@ func buildLLMTurnOutput(result *llm.ChatResult) *model.TurnLLMOutput {
 	}
 	out := &model.TurnLLMOutput{
 		Text:             result.Text,
+		Reasoning:        result.Reasoning,
 		PromptTokens:     result.Usage.PromptTokens,
 		CompletionTokens: result.Usage.CompletionTokens,
 		TotalTokens:      result.Usage.TotalTokens,

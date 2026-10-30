@@ -104,6 +104,7 @@ export const chatNS = {
     // ---- Agent 输出与思考过程 ----
     noTextReply: '（本次没有文本回复）',
     outputFiles: '产物文件',
+    toolCallChain: '工具调用链 · {n} 条',
     thinkProcess: '思考过程 · {n} 步',
     inProgress: '进行中',
     planningPhase: '规划期',
@@ -235,6 +236,7 @@ export const chatNS = {
     // ---- Agent 输出与思考过程 ----
     noTextReply: '(no text reply this round)',
     outputFiles: 'Output files',
+    toolCallChain: 'Tool calls · {n}',
     thinkProcess: 'Thinking process · {n} steps',
     inProgress: 'Running',
     planningPhase: 'Planning',

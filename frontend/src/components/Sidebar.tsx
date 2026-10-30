@@ -268,7 +268,7 @@ export default function Sidebar() {
               {convList.map((c) => (
                 <div
                   key={c.chat_id}
-                  className={`conv-item ${activeChatId === c.chat_id ? 'active' : ''}`}
+                  className={`conv-item ${activeChatId === c.chat_id ? 'active' : ''} ${editingId === c.chat_id ? 'editing' : ''}`}
                   onClick={() => navigate(`/chat/${c.chat_id}`)}
                 >
                   <div className="conv-icon">💬</div>

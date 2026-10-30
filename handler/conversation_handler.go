@@ -99,6 +99,10 @@ type ListConversationsResponse struct {
 // --- 对话详情 ---
 type GetConversationDetailRequest struct {
 	ChatID string `json:"chat_id"`
+	// Brief 轮询模式：只返回 chat_info（含工作流摘要），跳过对话任务详情渲染。
+	// 供工作流页/对话页的工作流状态轮询使用 —— 轮询只需工作流状态与节点进度，
+	// 对话任务的 think 重建与 token 统计是高频重活，跳过能显著降载。
+	Brief bool `json:"brief,omitempty"`
 }
 
 // --- 删除对话 ---
@@ -424,24 +428,47 @@ func GetConversationDetail(ctx *gin.Context, req interface{}) (interface{}, erro
 		return nil, &APIError{Code: http.StatusNotFound, Msg: "对话不存在"}
 	}
 
-	// 获取任务列表（只含对话任务；绑定的工作流单独返回）
+	// 工作流全集：brief 与完整模式都需要（workflow_list / workflow 面板数据源）。
 	taskDAO := &dao.TaskDAO{}
-	tasks, err := taskDAO.ListTasksByChatID(ctx, r.ChatID)
-	if err != nil {
-		return nil, err
-	}
-
-	// 提前加载工作流全集：给对话任务注入其绑定工作流的执行状态与结果
-	// （见 enrichBoundWorkflow）。放在任务详情循环之前，避免逐任务二次查询。
 	wfs, err := taskDAO.ListWorkflowTasksByChatID(ctx, r.ChatID)
 	if err != nil {
 		return nil, err
 	}
-	wfByID := make(map[string]*boundWorkflowSnapshot, len(wfs))
-	for _, wf := range wfs {
-		wfByID[wf.TaskID] = &boundWorkflowSnapshot{
-			dag:    decodeWorkflowOutput(wf),
-			status: wf.Status,
+
+	// 对话任务详情只在完整模式渲染。brief（轮询）模式跳过：轮询只需工作流
+	// 状态与节点进度，对话任务的 think 重建（enrichThinkProcess 查 turn 表）是
+	// 高频重活，跳过能显著降载。
+	//
+	// token 索引则两种模式都构建 —— 它是一次 GROUP BY（轻量），工作流节点的
+	// token 消耗靠它展示，跳过会让 DAG 面板 token 在轮询期间闪成 0。
+	tokenIdx := dao.BuildChatTokenIndex(ctx, r.ChatID)
+
+	var tasks []*model.Task
+	taskDetails := make([]map[string]interface{}, 0)
+	if !r.Brief {
+		tasks, err = taskDAO.ListTasksByChatID(ctx, r.ChatID)
+		if err != nil {
+			return nil, err
+		}
+
+		// 提前加载工作流全集：给对话任务注入其绑定工作流的执行状态与结果
+		// （见 enrichBoundWorkflow）。放在任务详情循环之前，避免逐任务二次查询。
+		wfByID := make(map[string]*boundWorkflowSnapshot, len(wfs))
+		for _, wf := range wfs {
+			wfByID[wf.TaskID] = &boundWorkflowSnapshot{
+				dag:    decodeWorkflowOutput(wf),
+				status: wf.Status,
+			}
+		}
+
+		turnDAO := &dao.TaskTurnDAO{}
+		taskDetails = make([]map[string]interface{}, 0, len(tasks))
+		for _, t := range tasks {
+			d := buildTaskDetailMap(t)
+			attachTokenStats(d, tokenIdx, t.TaskID)
+			enrichThinkProcess(ctx, turnDAO, t, d)
+			enrichBoundWorkflow(d, wfByID)
+			taskDetails = append(taskDetails, d)
 		}
 	}
 
@@ -461,20 +488,6 @@ func GetConversationDetail(ctx *gin.Context, req interface{}) (interface{}, erro
 	skillNameMap := make(map[string]string, len(skills))
 	for _, s := range skills {
 		skillNameMap[s.ID] = s.Name
-	}
-
-	// 构建任务详情列表
-	turnDAO := &dao.TaskTurnDAO{}
-	// token 索引一次性建好：本接口被前端 5s 轮询且要渲染每个任务，
-	// 逐任务查会变成 O(任务数 × 子任务数) 次 SQL。
-	tokenIdx := dao.BuildChatTokenIndex(ctx, r.ChatID)
-	taskDetails := make([]map[string]interface{}, 0, len(tasks))
-	for _, t := range tasks {
-		d := buildTaskDetailMap(t)
-		attachTokenStats(d, tokenIdx, t.TaskID)
-		enrichThinkProcess(ctx, turnDAO, t, d)
-		enrichBoundWorkflow(d, wfByID)
-		taskDetails = append(taskDetails, d)
 	}
 
 	mcpServers := make([]ConversationMCPServerInfo, 0)
@@ -558,6 +571,15 @@ func loadBoundWorkflow(
 	title := dag.Title
 	if title == "" {
 		title = task.Title
+	}
+
+	// DAG 面板只展示节点摘要（name/description/status），完整 output（tool_calls /
+	// think 明细）由 GetWorkflowNodeDetail 点开节点时单独拉。这里与 buildTaskDetailMap
+	// 一致，先摘要化节点 output，避免每次轮询 DAG 都带上 MB 级明细字段。
+	for i := range dag.Nodes {
+		if dag.Nodes[i].Output != nil {
+			summarizeNodeOutputForDetail(dag.Nodes[i].Output)
+		}
 	}
 
 	// 节点带上各自的 token 消耗与执行时长，同时算出整条工作流的合计
@@ -1177,6 +1199,9 @@ func buildTaskDetailMap(t *model.Task) map[string]interface{} {
 				for i := range wfOut.Nodes {
 					if wfOut.Nodes[i].Output != nil {
 						trimDetailToolCallOutputs(wfOut.Nodes[i].Output)
+						// 详情接口只给节点 reply 与产物摘要，tool_calls / think 明细
+						// 由 GetWorkflowNodeDetail 点开节点时单独拉，避免 DAG 膨胀。
+						summarizeNodeOutputForDetail(wfOut.Nodes[i].Output)
 					}
 				}
 				result["workflow_output"] = wfOut
@@ -1187,12 +1212,17 @@ func buildTaskDetailMap(t *model.Task) map[string]interface{} {
 	return result
 }
 
-// maxDetailToolCallOutputChars detail 返回里单条工具调用输出的最大字符数（按 rune）。
-//
-// 历史上 run_command 等工具可能把几百 MB 的日志写进 turn.output，进而被复制进
-// task_output.tool_calls[].output。detail 只做展示，不需要完整结果，这里截断，
-// 避免超大字符串贯穿响应序列化、日志打印与前端渲染。
-const maxDetailToolCallOutputChars = 4 * 1024
+// summarizeNodeOutputForDetail 摘要化工作流节点 output：详情接口只保留 reply 与
+// 产物清单，去掉 tool_calls / think_process / think_layers 这些明细大字段。
+// 节点详情页（WorkflowNodeDetail）点开时经 GetWorkflowNodeDetail 单独拉完整。
+func summarizeNodeOutputForDetail(out *model.AgentOutputData) {
+	if out == nil {
+		return
+	}
+	out.ToolCalls = nil
+	out.ThinkProcess = nil
+	out.ThinkLayers = nil
+}
 
 // trimDetailToolCallOutputs 截断 agent_output 里工具调用记录的超大输出。
 func trimDetailToolCallOutputs(out *model.AgentOutputData) {
@@ -1200,10 +1230,7 @@ func trimDetailToolCallOutputs(out *model.AgentOutputData) {
 		return
 	}
 	for i := range out.ToolCalls {
-		if n := len([]rune(out.ToolCalls[i].Output)); n > maxDetailToolCallOutputChars {
-			r := []rune(out.ToolCalls[i].Output)
-			out.ToolCalls[i].Output = string(r[:maxDetailToolCallOutputChars]) + "\n…(输出过大，已截断)…"
-		}
+		out.ToolCalls[i].Output = model.TruncateToolCallOutput(out.ToolCalls[i].Output)
 	}
 }
 
@@ -1214,8 +1241,13 @@ func trimDetailToolCallOutputs(out *model.AgentOutputData) {
 //   - 失败的任务由容器补写，存在时序窗口；且 planning/工具阶段失败时
 //     failed_reason 只有一句话，中间过程恰恰是排查关键
 //
-// 所以对「尚无 think_process」的任务一律实时重建。已有的不覆盖 ——
-// 终态由 actuator 写入，包含最完整的信息。
+// 重建规则按任务状态分流：
+//   - 终态任务：think_process 已由 actuator（成功）或容器（失败补写）写入，
+//     是最完整的一版，已有的不覆盖。
+//   - running 任务：think_process 可能是「失败重试残留的过期快照」——早期
+//     失败收口时 ToFailedStatus 把 task_output 写成了旧快照，框架自动重试
+//     恢复 running 后 task_output 不清空；若不重建，前端会一直卡在旧快照，
+//     看不到后续实时进展。因此 running 任务一律实时重建。
 func enrichThinkProcess(
 	ctx *gin.Context, turnDAO *dao.TaskTurnDAO,
 	t *model.Task, detail map[string]interface{},
@@ -1226,8 +1258,9 @@ func enrichThinkProcess(
 		return
 	}
 
-	// 已有非空 think_process 则不动
-	if out, ok := detail["agent_output"].(model.AgentOutputData); ok && len(out.ThinkProcess) > 0 {
+	// 终态任务且已有非空 think_process：actuator/容器已写入最完整一版，不重建。
+	// running 任务：实时重建，覆盖失败重试残留的过期快照。
+	if !shouldRebuildThinkProcess(t, detail) {
 		return
 	}
 
@@ -1236,10 +1269,70 @@ func enrichThinkProcess(
 		return
 	}
 	out, _ := detail["agent_output"].(model.AgentOutputData)
-	if !out.FillThinkProcess(turns) {
-		return
+	// 执行中的 task_output 还没有最终汇总，按已落库 turn 重建工具调用链；
+	// 终态若已有完整快照则保留 actuator/容器写入的版本。
+	if !t.IsTerminal() || len(out.ToolCalls) == 0 {
+		out.ToolCalls = toolCallRecordsFromTurns(turns)
 	}
+	out.FillThinkProcess(turns)
 	detail["agent_output"] = out
+}
+
+// toolCallRecordsFromTurns 与 actuator 的完成态汇总保持同一字段口径，供任务详情
+// 在执行期间根据 task_turn 实时生成工具调用链。
+func toolCallRecordsFromTurns(turns []*model.TaskTurn) []model.ToolCallRecord {
+	calls := make([]model.ToolCallRecord, 0)
+	for _, turn := range turns {
+		if turn == nil || turn.TurnType != model.TurnTypeToolCall || turn.Status == model.TurnStatusInterrupted {
+			continue
+		}
+		rec := model.ToolCallRecord{
+			ToolName:   turn.ToolName,
+			ServerName: turn.ServerName,
+			Status:     int(turn.Status),
+			TimeCost:   fmt.Sprintf("%dms", turn.TimeCostMs),
+		}
+		if turn.Input != "" {
+			var input model.TurnToolInput
+			if json.Unmarshal([]byte(turn.Input), &input) == nil {
+				if args, err := json.Marshal(input.Arguments); err == nil {
+					rec.Input = string(args)
+				}
+				if rec.ToolName == "" {
+					rec.ToolName = input.ToolName
+				}
+				if rec.ServerName == "" {
+					rec.ServerName = input.ServerName
+				}
+				rec.Summary = strings.TrimSpace(input.Summary)
+			}
+		}
+		if turn.Output != "" {
+			var output model.TurnToolOutput
+			if json.Unmarshal([]byte(turn.Output), &output) == nil {
+				rec.Output = model.TruncateToolCallOutput(output.Content)
+			}
+		}
+		if turn.ErrorMsg != "" && rec.Output == "" {
+			rec.Output = turn.ErrorMsg
+		}
+		calls = append(calls, rec)
+	}
+	return calls
+}
+
+// shouldRebuildThinkProcess 判断是否要实时重建 think_process。
+//
+// 终态任务（completed / failed / stopped / partial_failed）的 think_process
+// 已由 actuator（成功）或容器（失败补写）写入最完整一版，已有非空就不重建；
+// 其余（running / queued）任务的 think_process 可能是「失败重试残留的过期
+// 快照」，必须实时重建，否则前端会一直卡在旧快照、看不到后续实时进展。
+func shouldRebuildThinkProcess(t *model.Task, detail map[string]interface{}) bool {
+	if !t.IsTerminal() {
+		return true
+	}
+	out, ok := detail["agent_output"].(model.AgentOutputData)
+	return !ok || len(out.ThinkProcess) == 0
 }
 
 // boundWorkflowSnapshot 一条工作流的展示快照：DAG + 整体状态。

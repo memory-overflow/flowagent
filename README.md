@@ -145,7 +145,7 @@ All endpoints live under `/api/v1`, wrapped in a unified JSON envelope `{"code":
 | | `POST /conversations/chat` | Send a message, returns `task_id` |
 | | `POST /conversations/list` / `detail` / `delete` | List / detail / delete |
 | | `POST /conversations/mcp/*` · `/skills/*` | Per-conversation MCP / skill binding |
-| Task | `POST /tasks/detail` / `stop` / `retry` / `turns` | Detail / stop / retry / turns |
+| Task | `POST /tasks/detail` / `stop` / `retry` / `status` / `turns` | Detail / stop / retry / batch status / turns |
 | | `GET /tasks/stream` | SSE streaming output |
 | Model | `POST /models/list` / `create` / `update` / `delete` / `set-default` / `test` / `status` | Global model config |
 | MCP | `POST /mcp/servers/*` | CRUD, connection test, built-in import |

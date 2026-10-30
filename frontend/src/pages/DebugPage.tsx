@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { listTaskTurns, subscribeTaskStream } from '../services/api';
+import { listTaskTurns, getTurnDetail, subscribeTaskStream } from '../services/api';
 import type { TurnDebugView, TaskDebugSummary, SubTaskSummary } from '../services/api';
 import { useBlockMeta } from '../components/ContextUsage';
 import type { ContextBlocksView } from '../components/ContextUsage';
@@ -90,6 +90,10 @@ export default function DebugPage() {
   const [streamText, setStreamText] = useState<Record<number, string>>({});
   const streamTextRef = useRef<Record<number, string>>({});
 
+  // 思考链流式缓冲：turn_seq -> 已收到的 reasoning_content 增量拼成的实时文本。
+  const [streamReasoning, setStreamReasoning] = useState<Record<number, string>>({});
+  const streamReasoningRef = useRef<Record<number, string>>({});
+
   // 工具调用流式累积：turn_seq -> index -> { id, name, args }。
   const [streamToolCalls, setStreamToolCalls] = useState<StreamToolCalls>({});
   const streamToolCallsRef = useRef<StreamToolCalls>({});
@@ -146,6 +150,11 @@ export default function DebugPage() {
         if (ev.turn_seq == null) return;
         streamTextRef.current[ev.turn_seq] = (streamTextRef.current[ev.turn_seq] || '') + text;
         setStreamText({ ...streamTextRef.current });
+      },
+      onReasoning: (text, ev) => {
+        if (ev.turn_seq == null) return;
+        streamReasoningRef.current[ev.turn_seq] = (streamReasoningRef.current[ev.turn_seq] || '') + text;
+        setStreamReasoning({ ...streamReasoningRef.current });
       },
       onToolCall: (tc, ev) => {
         if (ev.turn_seq == null) return;
@@ -243,6 +252,7 @@ export default function DebugPage() {
             open={!!openTurns[t.turn_seq]}
             onToggle={() => setOpenTurns((prev) => ({ ...prev, [t.turn_seq]: !prev[t.turn_seq] }))}
             streamText={streamText[t.turn_seq]}
+            streamReasoning={streamReasoning[t.turn_seq]}
             streamToolCalls={streamToolCalls[t.turn_seq]}
           />
         ))}
@@ -443,14 +453,32 @@ function UserInputBlock({ text, open, onToggle }: { text?: string; open: boolean
 // 单条 turn
 // ============================================================
 
-function TurnCard({ turn, open, onToggle, streamText, streamToolCalls }: {
+function TurnCard({ turn, open, onToggle, streamText, streamReasoning, streamToolCalls }: {
   turn: TurnDebugView;
   open: boolean;
   onToggle: () => void;
   streamText?: string;
+  streamReasoning?: string;
   streamToolCalls?: Record<number, ToolCallAcc>;
 }) {
   const t = useT();
+  // 列表接口不返回 input/output 大字段，展开时按需拉取单条 turn 完整 payload。
+  // detailTried 防止拉取失败后 useEffect 反复重试造成死循环。
+  const [detail, setDetail] = useState<TurnDebugView | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailTried, setDetailTried] = useState(false);
+  useEffect(() => {
+    if (!open || turn.input_raw !== undefined || detail || detailLoading || detailTried) return;
+    setDetailLoading(true);
+    getTurnDetail(turn.task_id, turn.turn_seq)
+      .then((res) => setDetail(res.data.data))
+      .catch(() => setDetail(null))
+      .finally(() => {
+        setDetailLoading(false);
+        setDetailTried(true);
+      });
+  }, [open, turn.input_raw, turn.task_id, turn.turn_seq, detail, detailLoading, detailTried]);
+  const payload = detail || turn;
   const color = TURN_TYPE_COLOR[turn.turn_type_name] || '#5b8def';
   const statusColor = STATUS_COLOR[turn.status_name] || '#888';
   const phaseColor = PHASE_COLOR[turn.phase] || '#888';
@@ -505,6 +533,11 @@ function TurnCard({ turn, open, onToggle, streamText, streamToolCalls }: {
         <span className="debug-spacer" />
         <span className="debug-dim">{t('debug.round', { n: turn.round })}</span>
         <span className="debug-dim">{formatDuration(turn.time_cost_ms)}</span>
+        {turn.first_token_ms > 0 && (
+          <span className="debug-dim" title={t('debug.firstTokenTip')}>
+            {t('debug.firstToken', { ms: formatDuration(turn.first_token_ms) })}
+          </span>
+        )}
         {turn.total_tokens > 0 && (
           <span
             className="debug-dim"
@@ -545,14 +578,14 @@ function TurnCard({ turn, open, onToggle, streamText, streamToolCalls }: {
 
           {/* LLM 调用的输入分块占比：system / tools / 各历史段各占多少，
               一眼看出「这轮上下文被什么撑大了」 */}
-          {turn.turn_type_name === 'functional_call' && turnCtxBlocks(turn) && (
+          {turn.turn_type_name === 'functional_call' && turnCtxBlocks(payload) && (
             <ContextBlocksBlock
-              blocks={turnCtxBlocks(turn)!}
+              blocks={turnCtxBlocks(payload)!}
               promptTokens={turn.prompt_tokens}
             />
           )}
 
-          <RawBlock label="INPUT" raw={turn.input_raw} color="#5b8def" />
+          <RawBlock label="INPUT" raw={payload.input_raw} color="#5b8def" />
 
           {/* 模型正在流式输出时，实时展示已累积的文本。没有内容时给占位，
               方便判断「卡死」（占位迟迟不变）还是「输出慢」（文本持续增长）。 */}
@@ -566,6 +599,12 @@ function TurnCard({ turn, open, onToggle, streamText, streamToolCalls }: {
               </div>
               <pre className="debug-pre">{streamText || t('debug.waitingModelOutput')}</pre>
             </div>
+          )}
+
+          {/* 思考链（reasoning_content）实时输出：推理模型先吐思考再吐正文，
+              这里是原始思考链，默认展开、可复制，与上面的正文 stream 分开。 */}
+          {isStreaming && streamReasoning && (
+            <RawBlock label={t('debug.reasoningLive')} raw={streamReasoning} color="#a855f7" defaultOpen />
           )}
 
           {/* 工具调用的 raw 流式输出：按 tool_call index 归并 arguments 分片，
@@ -591,7 +630,7 @@ function TurnCard({ turn, open, onToggle, streamText, streamToolCalls }: {
             </div>
           )}
 
-          <RawBlock label="OUTPUT" raw={turn.output_raw} color="#10b981" />
+          <RawBlock label="OUTPUT" raw={payload.output_raw} color="#10b981" />
         </>
       )}
     </div>
@@ -602,7 +641,7 @@ function TurnCard({ turn, open, onToggle, streamText, streamToolCalls }: {
 // raw JSON 块：pretty-print + 折叠 + 复制
 // ============================================================
 
-function RawBlock({ label, raw, color }: { label: string; raw?: string; color: string }) {
+function RawBlock({ label, raw, color, defaultOpen }: { label: string; raw?: string; color: string; defaultOpen?: boolean }) {
   const t = useT();
   // pretty-print：能解析就格式化，不能就原样
   const text = (() => {
@@ -617,8 +656,8 @@ function RawBlock({ label, raw, color }: { label: string; raw?: string; color: s
   const lineCount = text ? text.split('\n').length : 0;
   const longContent = lineCount > COLLAPSE_LINE_THRESHOLD;
 
-  // 超长默认折叠，短内容始终展开
-  const [open, setOpen] = useState(!longContent);
+  // 超长默认折叠，短内容始终展开；defaultOpen 显式指定时以它为准（思考链默认展开）。
+  const [open, setOpen] = useState(defaultOpen ?? !longContent);
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
@@ -684,6 +723,9 @@ function turnCtxBlocks(turn: TurnDebugView): TurnCtxBlocks | null {
 function ContextBlocksBlock({ blocks, promptTokens }: { blocks: TurnCtxBlocks; promptTokens: number }) {
   const t = useT();
   const blockMeta = useBlockMeta();
+  // 默认折叠：这是辅助信息（这轮上下文被什么撑大），不是每次都要看的核心内容，
+  // 折叠态只留一行总量摘要，点「展开」再看进度条与分段占比。
+  const [open, setOpen] = useState(false);
   const total = blocks.total || 0;
   const limit = blocks.context_limit || 0;
   const percent = limit > 0 ? (total / limit) * 100 : 0;
@@ -702,40 +744,48 @@ function ContextBlocksBlock({ blocks, promptTokens }: { blocks: TurnCtxBlocks; p
           {promptTokens > 0 ? t('debug.ctxProvider', { n: fmtTok(promptTokens) }) : ''}
           {overTrigger ? t('debug.ctxOverTrigger') : ''}
         </span>
+        <span className="debug-spacer" />
+        <button className="debug-mini-btn" onClick={() => setOpen(!open)}>
+          {open ? t('common.collapse') : t('common.expand')}
+        </button>
       </div>
 
-      {/* 分段彩色进度条（按占上限比例画，无上限时按占比归一化）+ 触发线刻度 */}
-      <div className="ctx-usage-bar">
-        {segments.map((s) => (
-          <div
-            key={s.key}
-            className="ctx-usage-bar-seg"
-            style={{ width: `${total > 0 ? (s.value / (limit || total)) * 100 : 0}%`, background: s.color }}
-            title={`${s.label} ${fmtTok(s.value)}`}
-          />
-        ))}
-        {limit > 0 && (
-          <div
-            className="ctx-usage-bar-trigger"
-            style={{ left: '80%' }}
-            title={t('debug.ctxTriggerLine')}
-          />
-        )}
-      </div>
-
-      <div className="ctx-usage-rows">
-        {segments.map((s) => (
-          <div key={s.key} className="ctx-usage-row" title={s.desc}>
-            <span className="ctx-usage-dot" style={{ background: s.color }} />
-            <span className="ctx-usage-label">{s.label}</span>
-            <span className="ctx-usage-spacer" />
-            <span className="ctx-usage-val">
-              {total > 0 ? `${((s.value / total) * 100).toFixed(1)}%` : '-'}
-            </span>
-            <span className="ctx-usage-tok">{fmtTok(s.value)}</span>
+      {open && (
+        <>
+          {/* 分段彩色进度条（按占上限比例画，无上限时按占比归一化）+ 触发线刻度 */}
+          <div className="ctx-usage-bar">
+            {segments.map((s) => (
+              <div
+                key={s.key}
+                className="ctx-usage-bar-seg"
+                style={{ width: `${total > 0 ? (s.value / (limit || total)) * 100 : 0}%`, background: s.color }}
+                title={`${s.label} ${fmtTok(s.value)}`}
+              />
+            ))}
+            {limit > 0 && (
+              <div
+                className="ctx-usage-bar-trigger"
+                style={{ left: '80%' }}
+                title={t('debug.ctxTriggerLine')}
+              />
+            )}
           </div>
-        ))}
-      </div>
+
+          <div className="ctx-usage-rows">
+            {segments.map((s) => (
+              <div key={s.key} className="ctx-usage-row" title={s.desc}>
+                <span className="ctx-usage-dot" style={{ background: s.color }} />
+                <span className="ctx-usage-label">{s.label}</span>
+                <span className="ctx-usage-spacer" />
+                <span className="ctx-usage-val">
+                  {total > 0 ? `${((s.value / total) * 100).toFixed(1)}%` : '-'}
+                </span>
+                <span className="ctx-usage-tok">{fmtTok(s.value)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -802,7 +852,8 @@ const DEBUG_PAGE_STYLE = `
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 20px;
+  /* 右侧给全局偏好控件（语言/主题）预留空间，避免遮挡跳转/展开按钮 */
+  padding: 12px 180px 12px 20px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
 }

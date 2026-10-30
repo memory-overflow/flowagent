@@ -356,6 +356,84 @@ func TestDropOrphanToolResults_ParallelSameTool(t *testing.T) {
 	}
 }
 
+// ============================================================
+// dropOrphanToolCalls —— 孤立工具调用过滤
+// ============================================================
+
+// TestDropOrphanToolCalls_KeepsMatched 后面有对应 tool 结果的调用要保留
+func TestDropOrphanToolCalls_KeepsMatched(t *testing.T) {
+	in := []llm.Message{
+		{Role: llm.RoleUser, Content: "q"},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{Name: "a"}, {Name: "b"}}},
+		{Role: llm.RoleTool, ToolName: "a", Content: "ra"},
+		{Role: llm.RoleTool, ToolName: "b", Content: "rb"},
+	}
+	got := dropOrphanToolCalls(in)
+	if len(got) != 4 {
+		t.Fatalf("expected all 4 messages kept, got %d", len(got))
+	}
+	if n := len(got[1].ToolCalls); n != 2 {
+		t.Fatalf("expected 2 tool calls kept, got %d", n)
+	}
+}
+
+// TestDropOrphanToolCalls_DropsOrphan 后面没有 tool 结果的 assistant 调用必须丢弃。
+//
+// 真实来源：functional_call 成功发起工具调用，但随后的 tool_call turn 失败 /
+// 任务被中途停止，工具结果没落库。留在历史里会被 OpenAI/Azure 网关判
+// 「tool_calls 后必须跟对应 tool 结果」而 400。
+func TestDropOrphanToolCalls_DropsOrphan(t *testing.T) {
+	in := []llm.Message{
+		{Role: llm.RoleUser, Content: "q"},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{Name: "a"}, {Name: "b"}}},
+		// 没有 tool 结果，直接跟下一条 user
+		{Role: llm.RoleUser, Content: "next"},
+	}
+	got := dropOrphanToolCalls(in)
+	if len(got) != 2 {
+		t.Fatalf("orphan assistant should be dropped, got %d messages", len(got))
+	}
+	for _, m := range got {
+		if m.Role == llm.RoleAssistant && len(m.ToolCalls) > 0 {
+			t.Error("orphan assistant with tool_calls should be dropped")
+		}
+	}
+}
+
+// TestDropOrphanToolCalls_DropsPartial 部分调用缺结果时只丢缺结果的那个
+func TestDropOrphanToolCalls_DropsPartial(t *testing.T) {
+	in := []llm.Message{
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{Name: "a"}, {Name: "b"}}},
+		{Role: llm.RoleTool, ToolName: "a", Content: "ra"},
+	}
+	got := dropOrphanToolCalls(in)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(got))
+	}
+	as := got[0]
+	if len(as.ToolCalls) != 1 || as.ToolCalls[0].Name != "a" {
+		t.Errorf("only tool call 'a' should be kept, got %+v", as.ToolCalls)
+	}
+}
+
+// TestDropOrphanToolCalls_KeepsContent 整条调用都孤儿但还有正文时，保留正文、清空调用
+func TestDropOrphanToolCalls_KeepsContent(t *testing.T) {
+	in := []llm.Message{
+		{Role: llm.RoleAssistant, Content: "我先查一下", ToolCalls: []llm.ToolCall{{Name: "a"}}},
+		{Role: llm.RoleUser, Content: "next"},
+	}
+	got := dropOrphanToolCalls(in)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(got))
+	}
+	if got[0].Content != "我先查一下" {
+		t.Errorf("assistant content should be kept, got %q", got[0].Content)
+	}
+	if len(got[0].ToolCalls) != 0 {
+		t.Errorf("orphan tool calls should be cleared, got %+v", got[0].ToolCalls)
+	}
+}
+
 // TestTurnToMessage_FiltersByStatus turn 入历史的准入规则
 func TestTurnToMessage_FiltersByStatus(t *testing.T) {
 	llmOut := mustJSON(t, model.TurnLLMOutput{Text: "answer"})

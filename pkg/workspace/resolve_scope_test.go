@@ -1,39 +1,49 @@
 package workspace
 
 import (
-	"fmt"
+	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-// 只读工具放行项目根内的绝对路径；项目根外仍拒绝；写操作（resolveIn）
-// 无论是否在项目根内都拒绝绝对路径，维持工作区沙箱。
-func TestResolveInScopeProjectRoot(t *testing.T) {
-	root := t.TempDir()                    // 项目根
-	ws := filepath.Join(root, "workspace") // 工作区在项目根下
+func TestResolveInScopeAllowsAbsolutePaths(t *testing.T) {
+	root := t.TempDir()
+	ws := filepath.Join(root, "workspace")
 	wc := &Context{WorkspaceDir: ws, ProjectRoot: root}
 
-	// 项目根内绝对路径 → 放行，返回项目根内绝对路径
-	inRoot := filepath.Join(root, "skills", "pdfkit-py", "scripts")
-	got, err := resolveInScope(wc, inRoot, true)
-	if err != nil || got != inRoot {
-		t.Errorf("项目根内绝对路径应放行: got %q err %v", got, err)
+	outside := filepath.Join(t.TempDir(), "elsewhere", "file.txt")
+	for _, resolve := range []struct {
+		name string
+		fn   func(*Context, string) (string, error)
+	}{{"write", resolveIn}, {"read", resolveReadable}} {
+		t.Run(resolve.name, func(t *testing.T) {
+			got, err := resolve.fn(wc, outside)
+			if err != nil || got != filepath.Clean(outside) {
+				t.Fatalf("系统任意绝对路径应放行: got %q err %v", got, err)
+			}
+		})
 	}
-	// 项目根本身也放行
-	if got, err = resolveInScope(wc, root, true); err != nil || got != root {
-		t.Errorf("项目根本身应放行: got %q err %v", got, err)
+
+	got, err := resolveIn(wc, "a.txt")
+	if err != nil || got != filepath.Join(ws, "a.txt") {
+		t.Fatalf("相对路径应保留工作区语义: got %q err %v", got, err)
 	}
-	// 项目根外绝对路径 → 仍拒绝
-	if _, err = resolveInScope(wc, filepath.Join(filepath.Dir(root), "elsewhere"), true); err == nil {
-		t.Errorf("项目根外绝对路径应拒绝")
+	if _, err := resolveIn(wc, "../outside"); err == nil {
+		t.Fatal("相对路径仍应阻止 .. 越界")
 	}
-	// 相对路径行为不变 → 解析到工作区内
-	if got, err = resolveInScope(wc, "a.txt", true); err != nil || got != filepath.Join(ws, "a.txt") {
-		t.Errorf("相对路径应解析到工作区: got %q err %v", got, err)
+}
+
+func TestResolveInScopeExpandsHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
 	}
-	// 写操作 resolveIn → 即使项目根内也拒绝绝对路径
-	if _, err = resolveIn(wc, inRoot); err == nil || !strings.Contains(fmt.Sprint(err), "拒绝绝对路径") {
-		t.Errorf("写操作应拒绝绝对路径: err %v", err)
+	wc := &Context{WorkspaceDir: t.TempDir()}
+	got, err := resolveIn(wc, "~/flowagent-test.txt")
+	if err != nil || got != filepath.Join(home, "flowagent-test.txt") {
+		t.Fatalf("~ 路径展开错误: got %q err %v", got, err)
+	}
+	if _, err := resolveIn(wc, "~other/file"); err == nil {
+		t.Fatal("不应支持其他用户的 ~user 路径")
 	}
 }

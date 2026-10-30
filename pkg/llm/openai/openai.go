@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -613,10 +614,34 @@ func (r *idleTimeoutReader) Read(p []byte) (int, error) {
 	}
 }
 
+// bodyPrefixCapture 在读取响应体的同时，记录开头 maxBytes 字节的原始内容，
+// 供「流式解析出空结果」时打印排查（区分真空 SSE / 空 body / 非 SSE 的裸 JSON）。
+type bodyPrefixCapture struct {
+	r      io.Reader
+	prefix []byte
+	max    int
+}
+
+func (c *bodyPrefixCapture) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	if n > 0 && len(c.prefix) < c.max {
+		need := c.max - len(c.prefix)
+		if n < need {
+			need = n
+		}
+		c.prefix = append(c.prefix, p[:need]...)
+	}
+	return n, err
+}
+
+// emptyResultLogPrefixBytes 空结果时打印的原始响应前缀字节数。
+const emptyResultLogPrefixBytes = 512
+
 // parseStream 解析 text/event-stream 响应，逐 chunk 回调文本增量，
 // 累积工具调用分片，最终返回与阻塞式等价的 ChatResult。
 func (c *Client) parseStream(body io.Reader, onDelta func(llm.StreamDelta)) (*llm.ChatResult, error) {
-	body = &idleTimeoutReader{r: body, timeout: streamIdleTimeout}
+	capture := &bodyPrefixCapture{r: body, max: emptyResultLogPrefixBytes}
+	body = &idleTimeoutReader{r: capture, timeout: streamIdleTimeout}
 	scanner := bufio.NewScanner(body)
 	// 单行 data 可能很长（含大段 arguments），放大默认 buffer
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -627,11 +652,23 @@ func (c *Client) parseStream(body io.Reader, onDelta func(llm.StreamDelta)) (*ll
 	maxIndex := -1
 	var usage llm.Usage
 
+	// 识别「非 SSE 的裸错误体」：网关在流式下可能返回 200 + {"error":{...}}（不是 data: 行），
+	// 这些行会被下面的 HasPrefix("data:") 跳过。记录是否见过 data: 行、并收集非 data 内容，
+	// 循环结束后据此兜底，把真实错误暴露出来而不是静默吞成空结果。
+	sawDataLine := false
+	var nonData strings.Builder
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" || !strings.HasPrefix(line, "data:") {
+		if line == "" {
 			continue
 		}
+		if !strings.HasPrefix(line, "data:") {
+			nonData.WriteString(line)
+			nonData.WriteByte('\n')
+			continue
+		}
+		sawDataLine = true
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
 			break
@@ -674,6 +711,8 @@ func (c *Client) parseStream(body io.Reader, onDelta func(llm.StreamDelta)) (*ll
 		}
 		if delta.ReasoningContent != "" {
 			reasonBuf.WriteString(delta.ReasoningContent)
+			// 思考链增量一并透传：调试页据此实时展示原始 reasoning_content。
+			onDelta(llm.StreamDelta{Reasoning: delta.ReasoningContent})
 		}
 		for _, tcd := range delta.ToolCalls {
 			acc := accs[tcd.Index]
@@ -707,6 +746,20 @@ func (c *Client) parseStream(body io.Reader, onDelta func(llm.StreamDelta)) (*ll
 		return nil, fmt.Errorf("scan stream response: %w", err)
 	}
 
+	// 非 SSE 响应体兜底：全程没见到 data: 行，说明网关返回的根本不是流。
+	// 典型：部分网关在流式下对「tool_call_id 配对不完整」返回 200 + 裸 JSON 错误体
+	// （含 "error" 字段），这段会被上面的 HasPrefix("data:") 全部跳过；不当成错误
+	// 就会被误判成「模型没吐内容 / 没吐工具调用」。
+	if !sawDataLine {
+		if trimmed := strings.TrimSpace(nonData.String()); trimmed != "" {
+			var errResp openAIResponse
+			if json.Unmarshal([]byte(trimmed), &errResp) == nil && errResp.Error != nil {
+				return nil, fmt.Errorf("openai stream error (non-SSE body): %s", errResp.Error.Message)
+			}
+			log.Printf("[openai] stream body is not SSE (no data lines): %q", truncate(trimmed, 300))
+		}
+	}
+
 	result := &llm.ChatResult{Text: textBuf.String(), Reasoning: reasonBuf.String()}
 	// tool_calls 按 index 升序输出，保持模型原始顺序
 	for i := 0; i <= maxIndex; i++ {
@@ -725,6 +778,11 @@ func (c *Client) parseStream(body io.Reader, onDelta func(llm.StreamDelta)) (*ll
 		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	}
 	result.Usage = usage
+	// 空结果打原始前缀：正文与工具调用都为空时，空 ChatResult 无法区分
+	// 「网关真空返回」与「非 SSE 裸 JSON 被过滤」两类情况，前缀日志是关键排查线索。
+	if result.Text == "" && len(result.ToolCalls) == 0 {
+		log.Printf("[openai] stream returned empty content, raw body prefix: %q", string(capture.prefix))
+	}
 	return result, nil
 }
 

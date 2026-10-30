@@ -13,6 +13,54 @@ const STATUS_FAILED = 3;
 /** 折叠阈值：超过这个条数只展示前几条，其余收进「展开全部」 */
 const COLLAPSED_COUNT = 5;
 
+// 文件类工具 → 操作文案的 i18n key。命中的工具展示为「操作 + 文件名」，
+// 替代生硬的 builtin/xxx（read_file 等对用户更有意义）。
+const FILE_TOOL_OP: Record<string, string> = {
+  read_file: 'readFile',
+  write_file: 'writeFile',
+  edit_file: 'editFile',
+  list_dir: 'listDir',
+  create_dir: 'createDir',
+  file_exists: 'checkFile',
+  delete_path: 'deletePath',
+};
+
+// 非文件类内置工具的友好显示名；展开后仍展示真实工具名，便于调试。
+const BUILTIN_TOOL_LABEL: Record<string, string> = {
+  run_command: 'runCommand',
+};
+
+/** 从工具入参 JSON 里提取文件/目录路径（兼容 path / file_path / file 等字段名） */
+function extractPath(input: string): string {
+  if (!input) return '';
+  try {
+    const obj = JSON.parse(input);
+    const p = obj?.path ?? obj?.file_path ?? obj?.file ?? obj?.dir ?? obj?.filename ?? '';
+    if (typeof p === 'string') return p;
+  } catch {
+    /* 非 JSON 入参：不强求 */
+  }
+  return '';
+}
+
+/** 取路径最后一段作为展示用文件名 */
+function basename(p: string): string {
+  const s = p.replace(/[\\/]+$/, '');
+  const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+  return i >= 0 ? s.slice(i + 1) : s;
+}
+
+/** 入参优雅化：较短入参 prettify 成多行 JSON，长入参（如 write_file 的 content）原样保留 */
+function formatInput(input: string): string {
+  if (!input) return '';
+  if (input.length > 2000) return input;
+  try {
+    return JSON.stringify(JSON.parse(input), null, 2);
+  } catch {
+    return input;
+  }
+}
+
 export default function ToolCalls({ calls }: Props) {
   const t = useT();
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -39,9 +87,28 @@ export default function ToolCalls({ calls }: Props) {
         // 优先用模型在工具 schema 的 summary 参数里写的说明；
         // 为空时降级为 server/tool_name 拼接（保持与历史数据兼容）
         const summary = c.summary?.trim();
-        const fallback = c.server_name ? `${c.server_name}/${c.tool_name}` : c.tool_name;
-        const label = summary || fallback;
-        const usingSummary = !!summary;
+        const toolName = c.server_name ? `${c.server_name}/${c.tool_name}` : c.tool_name;
+
+        // 文件类工具：折叠态展示「操作 + 文件名」；展开后补全完整路径。
+        // tool_name 兼容历史格式（如 fs__read_file / builtin 前缀），按 __ 取末段归一化。
+        const bareName = c.tool_name.split('__').pop() || c.tool_name;
+        const opKey = FILE_TOOL_OP[bareName];
+        const builtinLabelKey = BUILTIN_TOOL_LABEL[bareName];
+        const filePath = opKey ? extractPath(c.input) : '';
+        const isFileTool = !!opKey && !!filePath;
+
+        let label: string;
+        if (isFileTool) {
+          label = `${t(`toolCalls.${opKey}`)} ${basename(filePath)}`;
+        } else if (builtinLabelKey) {
+          const friendlyName = t(`toolCalls.${builtinLabelKey}`);
+          label = summary ? `【${friendlyName}】${summary}` : `【${friendlyName}】`;
+        } else if (summary) {
+          label = `【${toolName}】${summary}`;
+        } else {
+          label = `【${toolName}】`;
+        }
+        const usingSummary = !isFileTool && !!summary;
 
         return (
           <div key={i} className="tool-call-item">
@@ -53,21 +120,30 @@ export default function ToolCalls({ calls }: Props) {
 
             {isOpen && (
               <>
-                {usingSummary && (
-                  // 展示 summary 时把 server/tool_name 拼接到折叠态作为补充元数据，
-                  // 否则点击展开后用户看不到「这是哪个工具」
+                {/* 文件工具折叠态只显示文件名，展开后补「工具名 + 完整路径」；
+                    其它工具沿用 summary 时补工具名，避免展开后不知道是哪个工具 */}
+                {isFileTool ? (
                   <div className="tool-meta">
-                    {t('toolCalls.tool')}<code>{fallback}</code>
+                    {t('toolCalls.tool')}<code>{toolName}</code>
+                    <span className="tool-path">{filePath}</span>
                   </div>
+                ) : (
+                  usingSummary && (
+                    <div className="tool-meta">
+                      {t('toolCalls.tool')}<code>{toolName}</code>
+                    </div>
+                  )
                 )}
                 {c.input && (
                   <div className="tool-args">
-                    {t('toolCalls.args')}<code>{c.input}</code>
+                    <div className="tool-detail-label">{t('toolCalls.input')}</div>
+                    <pre className="tool-args-pre">{formatInput(c.input)}</pre>
                   </div>
                 )}
                 {c.output && (
                   // 工具返回常含 markdown（文件内容、页面快照等），按 markdown 渲染
                   <div className={`tool-result${failed ? ' failed' : ''}`}>
+                    <div className="tool-detail-label">{t('toolCalls.output')}</div>
                     <Markdown compact>{c.output}</Markdown>
                   </div>
                 )}

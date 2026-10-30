@@ -202,27 +202,67 @@ func TestValidatePlanningResp_IncrementalDeps(t *testing.T) {
 			{NodeID: "n3_write", Name: "撰写", DependsOn: []string{"n2_analyze"}},
 		},
 	}
-	if err := validatePlanningResp(resp, existing, nil); err != nil {
+	if err := validatePlanningResp(resp, existing, nil, nil); err != nil {
 		t.Errorf("incremental single node should pass: %v", err)
 	}
 
 	// id 与已有节点冲突
 	resp.NewNodes[0].NodeID = "n1_search"
-	if err := validatePlanningResp(resp, existing, nil); err == nil {
+	if err := validatePlanningResp(resp, existing, nil, nil); err == nil {
 		t.Error("conflicting node_id should be rejected")
 	}
 
 	// 依赖不存在的节点
 	resp.NewNodes[0].NodeID = "n3_write"
 	resp.NewNodes[0].DependsOn = []string{"n9_ghost"}
-	if err := validatePlanningResp(resp, existing, nil); err == nil {
+	if err := validatePlanningResp(resp, existing, nil, nil); err == nil {
 		t.Error("dependency on unknown node should be rejected")
 	}
 
 	// 自依赖
 	resp.NewNodes[0].DependsOn = []string{"n3_write"}
-	if err := validatePlanningResp(resp, existing, nil); err == nil {
+	if err := validatePlanningResp(resp, existing, nil, nil); err == nil {
 		t.Error("self dependency should be rejected")
+	}
+}
+
+// TestValidatePlanningResp_CrossWorkflowDependencyFeedback 验证「跨工作流引用节点」
+// 的反馈信息：明确列出目标工作流的已有节点，并指出被引用节点属于哪条工作流。
+func TestValidatePlanningResp_CrossWorkflowDependencyFeedback(t *testing.T) {
+	existing := &model.WorkflowOutputData{
+		Nodes: []model.WorkflowNodeData{{NodeID: "n1_search"}},
+	}
+	wfs := &workflowContext{
+		Candidates: []*workflowCandidate{
+			{
+				TaskID: "wf-other",
+				Title:  "修复图片预览",
+				DAG: &model.WorkflowOutputData{
+					Nodes: []model.WorkflowNodeData{{NodeID: "n9_log_llm_req_rsp"}},
+				},
+			},
+		},
+	}
+	resp := &planningLLMResp{
+		Mode: model.PlanModeWorkflow,
+		NewNodes: []planningLLMNode{
+			{NodeID: "n10_compress", Name: "压缩", DependsOn: []string{"n1_search", "n9_log_llm_req_rsp"}},
+		},
+	}
+
+	err := validatePlanningResp(resp, existing, nil, wfs)
+	if err == nil {
+		t.Fatal("cross-workflow dependency should be rejected")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "另一条工作流") || !strings.Contains(msg, "修复图片预览") {
+		t.Fatalf("feedback should name the owning workflow, got: %v", msg)
+	}
+	if !strings.Contains(msg, "n1_search") {
+		t.Fatalf("feedback should list target workflow nodes, got: %v", msg)
+	}
+	if !strings.Contains(msg, "n9_log_llm_req_rsp") {
+		t.Fatalf("feedback should name the referenced node, got: %v", msg)
 	}
 }
 
@@ -297,7 +337,7 @@ func TestValidatePlanningResp_AppendSkipsOldSink(t *testing.T) {
 			{NodeID: "n11", Name: "渲染动画第一帧", DependsOn: []string{"n9"}},
 		},
 	}
-	if err := validatePlanningResp(resp, existing, nil); err != nil {
+	if err := validatePlanningResp(resp, existing, nil, nil); err != nil {
 		t.Errorf("append skipping old sink should pass, got: %v", err)
 	}
 }
@@ -318,7 +358,7 @@ func TestValidatePlanningResp_AppendStillRejectsMultipleNewSinks(t *testing.T) {
 			{NodeID: "n3", Name: "分支B", DependsOn: []string{"n1"}},
 		},
 	}
-	if err := validatePlanningResp(resp, existing, nil); err == nil {
+	if err := validatePlanningResp(resp, existing, nil, nil); err == nil {
 		t.Error("append with two new sinks (no converge) should be rejected")
 	}
 }
@@ -427,7 +467,7 @@ func TestFallbackPlan(t *testing.T) {
 	if fb.Reason == "" {
 		t.Error("fallback should carry a reason for think_process")
 	}
-	if err := validatePlanningResp(fb, nil, nil); err != nil {
+	if err := validatePlanningResp(fb, nil, nil, nil); err != nil {
 		t.Errorf("fallback plan must be valid: %v", err)
 	}
 }
