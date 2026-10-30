@@ -672,7 +672,7 @@ func runCommandTool() *ToolDef {
 	shellName, shellFlag := shellCommand()
 	return &ToolDef{
 		Name: "run_command",
-		Description: fmt.Sprintf("在工作区目录内执行一条 shell 命令（%s %s），返回 stdout。适合编译、运行脚本、git 等。危险删除命令会被拦截。"+
+		Description: fmt.Sprintf("在工作区目录内执行一条 shell 命令（%s %s），返回 stdout。适合编译、运行脚本、git、探测环境等。不要用它创建或修改文件内容——新建或改文件请用 write_file / edit_file。危险删除命令会被拦截。"+
 			"可选 timeout_seconds 指定超时（默认 %d 秒，上限 %d 秒）：预计耗时较长的命令"+
 			"（全盘搜索、全量编译、大批量文件处理）请主动放宽，否则会被默认超时打断。",
 			shellName, shellFlag, int(DefaultTimeout.Seconds()), int(maxCommandTimeout.Seconds())),
