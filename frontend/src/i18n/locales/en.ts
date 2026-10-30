@@ -223,9 +223,20 @@ export const en = {
 
   toolCalls: {
     tool: 'Tool: ',
+    input: 'Input',
+    output: 'Output',
     args: 'Args: ',
     collapseAll: 'Collapse tool calls',
     expandAll: 'Show all {n} tool calls ({hidden} more)',
+    // Action labels for file tools (shown as "action + filename" instead of builtin/xxx)
+    readFile: 'Read file',
+    writeFile: 'Write file',
+    editFile: 'Edit file',
+    listDir: 'List dir',
+    createDir: 'Create dir',
+    checkFile: 'Check file',
+    deletePath: 'Delete',
+    runCommand: 'Run command',
   },
 
   context: {

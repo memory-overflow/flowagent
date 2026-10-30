@@ -1789,6 +1789,8 @@ function AgentOutputView({
 }) {
   const t = useT();
   const [showThink, setShowThink] = useState(defaultShowThink);
+  // 工具调用链默认展开 —— 这是任务「做了什么」的直接证据；但给标题以便折叠
+  const [showToolCalls, setShowToolCalls] = useState(true);
   const hasReply = !!output.reply_text?.trim();
   // 后端已产出分层思考过程（规划期 / 执行期）时，改用两层分组展示；
   // 老数据或未分层时回退到平铺列表。
@@ -1815,7 +1817,13 @@ function AgentOutputView({
       )}
 
       {output.tool_calls?.length > 0 && (
-        <ToolCalls calls={output.tool_calls} />
+        <div className="tool-calls-section">
+          <div className="tool-calls-title" onClick={() => setShowToolCalls(!showToolCalls)}>
+            {showToolCalls ? '▾' : '▸'} {t('chat.toolCallChain', { n: output.tool_calls.length })}
+            {running && <span className="think-live">{t('chat.inProgress')}</span>}
+          </div>
+          {showToolCalls && <ToolCalls calls={output.tool_calls} />}
+        </div>
       )}
 
       {output.think_process?.length > 0 && (

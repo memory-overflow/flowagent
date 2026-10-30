@@ -15,7 +15,7 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import type { ConversationWorkflow, WorkflowNode, TaskStatus, AgentOutput } from '../types/api';
+import type { ConversationWorkflow, WorkflowNode, TaskStatus, AgentOutput, ToolCallRecord } from '../types/api';
 import { getWorkflowNodeDetail } from '../services/api';
 import Markdown from './Markdown';
 import ToolCalls from './ToolCalls';
@@ -465,13 +465,15 @@ interface WorkflowNodeDetailProps {
   onClose: () => void;
   /** 运行中子任务的实时思考过程（node_id -> 步骤列表），执行中 node.output 尚未写入时兜底展示 */
   liveThink?: Record<string, string[]>;
+  /** 运行中子任务的实时工具调用链（node_id -> 工具调用列表），与 liveThink 对称兜底展示 */
+  liveToolCalls?: Record<string, ToolCallRecord[]>;
   /** 父工作流任务 ID（单节点重试用） */
   workflowTaskId?: string;
   /** 重试单个失败节点的回调（入参为 node_id 或子任务 task_id） */
   onRetryNode?: (nodeId: string) => void;
 }
 
-export function WorkflowNodeDetail({ node, nodes, onClose, liveThink, workflowTaskId, onRetryNode }: WorkflowNodeDetailProps) {
+export function WorkflowNodeDetail({ node, nodes, onClose, liveThink, liveToolCalls, workflowTaskId, onRetryNode }: WorkflowNodeDetailProps) {
   const t = useT();
   // 详情接口已对节点 output 做摘要化（去掉 tool_calls / think 明细），这里点开节点时
   // 按需拉取完整 output。fullOutput 为 null 表示未拉取或拉取失败（回退摘要）。
@@ -503,6 +505,10 @@ export function WorkflowNodeDetail({ node, nodes, onClose, liveThink, workflowTa
     ? output.think_process
     : liveThink?.[node.node_id] || [];
   const isLive = finalThink.length > 0 && !output?.think_process?.length;
+  // 终态工具调用链优先（落库最完整）；执行中退回实时重建的工具调用列表
+  const finalToolCalls = output?.tool_calls?.length
+    ? output.tool_calls
+    : liveToolCalls?.[node.node_id] || [];
   // 思考过程默认展开 —— 子任务的中间过程正是排查该节点执行情况的关键
   const [showThink, setShowThink] = useState(true);
 
@@ -647,12 +653,12 @@ export function WorkflowNodeDetail({ node, nodes, onClose, liveThink, workflowTa
         </div>
       )}
 
-      {!!output?.tool_calls?.length && (
+      {finalToolCalls.length > 0 && (
         <div className="wf-detail-output wf-detail-tool-calls">
           <div className="wf-detail-output-label">
-            {t('workflow.toolCalls', { n: output.tool_calls.length })}
+            {t('workflow.toolCalls', { n: finalToolCalls.length })}
           </div>
-          <ToolCalls calls={output.tool_calls} />
+          <ToolCalls calls={finalToolCalls} />
         </div>
       )}
 

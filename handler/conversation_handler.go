@@ -1269,10 +1269,56 @@ func enrichThinkProcess(
 		return
 	}
 	out, _ := detail["agent_output"].(model.AgentOutputData)
-	if !out.FillThinkProcess(turns) {
-		return
+	// 执行中的 task_output 还没有最终汇总，按已落库 turn 重建工具调用链；
+	// 终态若已有完整快照则保留 actuator/容器写入的版本。
+	if !t.IsTerminal() || len(out.ToolCalls) == 0 {
+		out.ToolCalls = toolCallRecordsFromTurns(turns)
 	}
+	out.FillThinkProcess(turns)
 	detail["agent_output"] = out
+}
+
+// toolCallRecordsFromTurns 与 actuator 的完成态汇总保持同一字段口径，供任务详情
+// 在执行期间根据 task_turn 实时生成工具调用链。
+func toolCallRecordsFromTurns(turns []*model.TaskTurn) []model.ToolCallRecord {
+	calls := make([]model.ToolCallRecord, 0)
+	for _, turn := range turns {
+		if turn == nil || turn.TurnType != model.TurnTypeToolCall || turn.Status == model.TurnStatusInterrupted {
+			continue
+		}
+		rec := model.ToolCallRecord{
+			ToolName:   turn.ToolName,
+			ServerName: turn.ServerName,
+			Status:     int(turn.Status),
+			TimeCost:   fmt.Sprintf("%dms", turn.TimeCostMs),
+		}
+		if turn.Input != "" {
+			var input model.TurnToolInput
+			if json.Unmarshal([]byte(turn.Input), &input) == nil {
+				if args, err := json.Marshal(input.Arguments); err == nil {
+					rec.Input = string(args)
+				}
+				if rec.ToolName == "" {
+					rec.ToolName = input.ToolName
+				}
+				if rec.ServerName == "" {
+					rec.ServerName = input.ServerName
+				}
+				rec.Summary = strings.TrimSpace(input.Summary)
+			}
+		}
+		if turn.Output != "" {
+			var output model.TurnToolOutput
+			if json.Unmarshal([]byte(turn.Output), &output) == nil {
+				rec.Output = model.TruncateToolCallOutput(output.Content)
+			}
+		}
+		if turn.ErrorMsg != "" && rec.Output == "" {
+			rec.Output = turn.ErrorMsg
+		}
+		calls = append(calls, rec)
+	}
+	return calls
 }
 
 // shouldRebuildThinkProcess 判断是否要实时重建 think_process。

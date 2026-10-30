@@ -235,9 +235,20 @@ export const zh = {
 
   toolCalls: {
     tool: '工具：',
+    input: '输入',
+    output: '输出',
     args: '参数: ',
     collapseAll: '收起工具调用',
     expandAll: '展开全部 {n} 条工具调用（还有 {hidden} 条）',
+    // 文件类工具的「操作」文案（展示为「操作 + 文件名」，替代 builtin/xxx）
+    readFile: '读取文件',
+    writeFile: '写入文件',
+    editFile: '编辑文件',
+    listDir: '列出目录',
+    createDir: '创建目录',
+    checkFile: '检查文件',
+    deletePath: '删除',
+    runCommand: '执行命令',
   },
 
   context: {

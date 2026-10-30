@@ -8,7 +8,7 @@ import {
   stopTask,
   subscribeTaskStream,
 } from '../services/api';
-import type { ConversationWorkflow, WorkflowListItem, WorkflowNode } from '../types/api';
+import type { ConversationWorkflow, ToolCallRecord, WorkflowListItem, WorkflowNode } from '../types/api';
 import { TaskStatus } from '../types/api';
 import WorkflowGraph, { WorkflowNodeDetail } from '../components/WorkflowGraph';
 import WorkflowSwitcher from '../components/WorkflowSwitcher';
@@ -45,6 +45,9 @@ export default function WorkflowPage() {
   // 与 node.output.think_process（终态落库）互补 —— 执行中 node.output 尚未写，
   // 这里靠订阅子任务 SSE，在 turn_done/task_done 时回拉 getTaskDetail 实时重建。
   const [liveThink, setLiveThink] = useState<Record<string, string[]>>({});
+  // 运行中子任务的实时工具调用链：node_id -> 工具调用列表，与 liveThink 对称。
+  // 执行中节点尚未产出终态 output，工具调用链同样靠回拉 getTaskDetail 实时重建。
+  const [liveToolCalls, setLiveToolCalls] = useState<Record<string, ToolCallRecord[]>>({});
   // 每个子任务的 SSE 关闭函数，key = 子任务 task_id，避免重复订阅。
   const sseClosersRef = useRef<Record<string, () => void>>({});
 
@@ -166,13 +169,16 @@ export default function WorkflowPage() {
 
   useEffect(() => { fetchWorkflow(); }, [fetchWorkflow]);
 
-  // 拉取某个运行中子任务的实时思考过程。
-  const fetchLiveThink = useCallback(async (nodeId: string, taskId: string) => {
+  // 拉取某个运行中子任务的实时思考过程与工具调用链。
+  const fetchLive = useCallback(async (nodeId: string, taskId: string) => {
     try {
       const res = await getTaskDetail(taskId);
-      const steps = res.data.data.agent_output?.think_process;
-      if (steps && steps.length > 0) {
-        setLiveThink((prev) => ({ ...prev, [nodeId]: steps }));
+      const out = res.data.data.agent_output;
+      if (out?.think_process && out.think_process.length > 0) {
+        setLiveThink((prev) => ({ ...prev, [nodeId]: out.think_process }));
+      }
+      if (out?.tool_calls && out.tool_calls.length > 0) {
+        setLiveToolCalls((prev) => ({ ...prev, [nodeId]: out.tool_calls }));
       }
     } catch {
       /* 子任务尚未就绪或已清理，忽略，交给下次刷新 */
@@ -204,10 +210,10 @@ export default function WorkflowPage() {
       if (sseClosersRef.current[taskId]) continue; // 已订阅，跳过
       const close = subscribeTaskStream(taskId, {
         onTurnDone: () => {
-          fetchLiveThink(node.node_id, taskId);
+          fetchLive(node.node_id, taskId);
         },
         onTaskDone: () => {
-          fetchLiveThink(node.node_id, taskId);
+          fetchLive(node.node_id, taskId);
           const c = sseClosersRef.current[taskId];
           delete sseClosersRef.current[taskId];
           c?.();
@@ -215,7 +221,7 @@ export default function WorkflowPage() {
       });
       sseClosersRef.current[taskId] = close;
     }
-  }, [nodes, fetchLiveThink]);
+  }, [nodes, fetchLive]);
 
   // 卸载时关闭所有子任务 SSE 连接
   useEffect(() => {
@@ -395,6 +401,7 @@ export default function WorkflowPage() {
                     node={selected}
                     nodes={nodes}
                     liveThink={liveThink}
+                    liveToolCalls={liveToolCalls}
                     workflowTaskId={workflow?.task_id}
                     onRetryNode={handleRetryNode}
                     onClose={() => setSelectedId(null)}

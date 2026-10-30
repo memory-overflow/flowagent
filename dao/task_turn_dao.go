@@ -321,30 +321,31 @@ func (d *TaskTurnDAO) ListTurnsByTaskIDForThink(ctx context.Context, taskID stri
 		return nil, fmt.Errorf("list turns by task_id (light): %w", err)
 	}
 
-	// 收集 LLM 调用的主键，单独回填其 output（小字段）。
-	var llmIDs []int64
+	// LLM output 用于重建思考过程；工具 output 用于执行中实时展示工具调用链。
+	// 其它 turn 的大 output 仍不加载，避免轮询详情时无谓放大响应。
+	var outputIDs []int64
 	for _, t := range turns {
-		if t.TurnType.IsLLMCall() {
-			llmIDs = append(llmIDs, t.ID)
+		if t.TurnType.IsLLMCall() || t.TurnType == model.TurnTypeToolCall {
+			outputIDs = append(outputIDs, t.ID)
 		}
 	}
-	if len(llmIDs) > 0 {
+	if len(outputIDs) > 0 {
 		var outs []struct {
 			ID     int64
 			Output string
 		}
 		if err := db.Model(&model.TaskTurn{}).
-			Where("id IN ?", llmIDs).
+			Where("id IN ?", outputIDs).
 			Select("id", "output").
 			Find(&outs).Error; err != nil {
-			return nil, fmt.Errorf("backfill llm output: %w", err)
+			return nil, fmt.Errorf("backfill turn output: %w", err)
 		}
 		outputByID := make(map[int64]string, len(outs))
 		for _, o := range outs {
 			outputByID[o.ID] = o.Output
 		}
 		for _, t := range turns {
-			if t.TurnType.IsLLMCall() {
+			if t.TurnType.IsLLMCall() || t.TurnType == model.TurnTypeToolCall {
 				t.Output = outputByID[t.ID]
 			}
 		}
