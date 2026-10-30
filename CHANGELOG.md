@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-30
+
+### Added
+
+- `edit_file` native tool: precise in-place file editing with `str_replace` and `insert` operations.
+- Reveal-in-folder and open-workspace actions: jump to a file in Finder / Explorer / the Linux file manager, or open the conversation workspace directly.
+- Single-file Markdown skill import (`POST /skills/import-md`), alongside the existing zip import.
+- Workflow single-node retry: retry a failed node and its downstream closure while keeping completed upstream results (`POST /tasks/retry-node`).
+- Per-source workflow summary with user preference controls and matching UI updates.
+- Configurable tool-call labels, configurable max round limits, and a longer image-analysis timeout.
+- Leveled logging (debug / info / warn / error) with size-based log rotation.
+
+### Changed
+
+- Skills now follow the Agent Skills model: executable skills are dropped, prompt-type and command-type skills remain; the skill directory is injected into the prompt so scripts resolve to the right path.
+- `/tasks/turns` returns summarized turns; the full turn payload is lazy-loaded on demand via `POST /tasks/turn-detail`.
+- Workflow task detail returns summarized node output; full node output is lazy-loaded via `POST /tasks/node-detail`.
+- Tool-call outputs are truncated (4 KB) when persisted, so task records stay small.
+- install / start / build scripts share a common Go build environment setup.
+- README demo assets: the demo GIF is palette-optimized so it renders on GitHub.
+
+### Fixed
+
+- `list_dir` tolerates a missing workspace directory instead of erroring out.
+- Replanning now returns explicit feedback when a plan references nodes from another workflow, instead of silently falling back to a single agent.
+
+### Performance
+
+- Terminal task details are cached (10 min TTL), cutting repeated list / detail request latency.
+- Slow SQL queries (> 200 ms) and SQL errors are logged to surface hot spots.
+
+## [0.1.0] - 2026-10-14
+
 ### Added
 
 - Conversation → DAG planning: turn a natural-language request into a directed acyclic graph (DAG) of sub-tasks, with `depends_on` expressing dependencies.
