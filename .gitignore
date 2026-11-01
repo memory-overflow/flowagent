@@ -58,6 +58,9 @@ config/config.yaml
 # macOS
 .DS_Store
 
+# WorkBuddy 工作区记忆（本机辅助数据，非项目资产）
+.workbuddy/
+
 # sqlite 模式落地的数据库文件（系统设置可选驱动）
 data/*.db
 data/*.db-wal

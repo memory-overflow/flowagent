@@ -684,6 +684,16 @@ func planningPhaseImpl(ctx context.Context, temp *model.TaskTemp) (data interfac
 		result, err := chatWithToolsStreaming(ctx, llmClient,
 			temp.TaskID, turn.ID, turn.TurnSeq, messages, tools, choice, opts)
 		if err != nil {
+			// context 取消不是业务失败（同执行期），只收口 turn、延后重排等待恢复。
+			if isContextCanceled(err) {
+				reason := &contextCanceledError{Cause: err}
+				if ierr := funcCallRegistry.turnDAO.InterruptTurn(ctx, turn.ID, reason); ierr != nil {
+					log.Printf("[func-call-actuator][%s] interrupt planning turn %d error: %v",
+						temp.TaskID, turn.ID, ierr)
+				}
+				publishTurnDone(temp.TaskID, turn.ID, turn.TurnSeq)
+				return nil, reason
+			}
 			return nil, failTurn(fmt.Errorf("func-call-actuator: planning llm chat failed: %w", err))
 		}
 		llmResult = result

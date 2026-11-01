@@ -173,6 +173,33 @@ const funcCallSystemPrompt = `你是一个能够使用工具的智能助手。
 // 执行逻辑
 // ============================================================
 
+// contextCanceledError 表示本轮 LLM 调用因 context 取消而中断。
+//
+// 与普通 LLM 失败（网络抖动 / 网关 5xx / 超时）不同，context 取消不是
+// 业务性失败，而是外部动作（任务被停止、进程重启、停止感知 guard）触发。
+// 此时不应把 turn / 节点 / 子任务状态改成 failed —— 任务本身可能已经被
+// 标成 stopped，也可能只是需要等下一轮调度恢复。正确做法是静默收口当前
+// 卡在 running 的 turn，并让任务延后重排，等待恢复。
+type contextCanceledError struct {
+	// Cause 触发取消的底层错误（通常是 context.Canceled）
+	Cause error
+}
+
+func (e *contextCanceledError) Error() string {
+	return fmt.Sprintf("func-call-actuator: llm 调用因 context 取消被中断（%v）", e.Cause)
+}
+
+func (e *contextCanceledError) Unwrap() error { return e.Cause }
+
+// isContextCanceled 判断 err 是否由 context 取消引起。
+//
+// 用 errors.Is 穿透 %w 包装链，命中标准库的 context.Canceled（HTTP 请求的
+// ctx 被 cancel 后，http.Client.Do 返回的正是这个 sentinel error）。也兜底
+// DeadlineExceeded 之外的情况：只认取消，不把超时误判成取消。
+func isContextCanceled(err error) bool {
+	return errors.Is(err, context.Canceled)
+}
+
 // funcCallImpl functional_call 阶段的实际逻辑（同步执行）。
 //
 // 按 task.phase 分派到规划期 / 执行期两套逻辑。两者共享历史重建、
@@ -215,6 +242,17 @@ func funcCallImpl(ctx context.Context, task *framework.Task) (data interface{}, 
 		data, err = executingPhaseImpl(ctx, temp)
 	}
 
+	// context 取消：LLM 调用被外部动作（停止 / 重启 / 停止感知 guard）中断，
+	// 不是业务性失败。不改动 turn/节点/子任务状态（调用点已把卡住的 turn 收口
+	// 为 interrupted），只把任务延后重排等待恢复，绝不判失败。
+	var cancelErr *contextCanceledError
+	if errors.As(err, &cancelErr) {
+		if dErr := deferTaskForContextCancel(ctx, temp, cancelErr); dErr != nil {
+			return nil, dErr
+		}
+		return nil, nil
+	}
+
 	// 压缩要等前置任务收尾：本轮什么都没做（没调 LLM、没写 turn），
 	// 把任务延后重排而不是推进或判失败。
 	var waitErr *deferWaitError
@@ -225,6 +263,37 @@ func funcCallImpl(ctx context.Context, task *framework.Task) (data interface{}, 
 		return nil, nil
 	}
 	return data, err
+}
+
+// deferTaskForContextCancel 把「LLM 调用被 context 取消」翻译成一次延后重排。
+//
+// 与 deferTaskForCompression 同构：都是「既不成功也不失败」的延后重排，但
+// 语义不同 —— 前者等前置任务收尾，这里等下一次调度恢复。context 取消通常是
+// 瞬时的外部动作（停止/重启），恢复很快，但仍用 delay_until 防止任务在
+// 取消尚未解除的窗口内被调度器紧循环反复捞起空转。
+//
+// 关键：绝不调用 FailTurn、绝不改 task 状态为 failed。当前卡在 running 的
+// turn 已在调用点（runExecutingLoop / planningPhaseImpl）被收口为 interrupted，
+// 这里只需把任务拨回本阶段 wait 重新排队。
+func deferTaskForContextCancel(
+	ctx context.Context, temp *model.TaskTemp, cancelErr *contextCanceledError,
+) error {
+	// 用 defer_count 复用退避：连续被取消时逐步拉长等待，避免空转放大。
+	delay := nextDeferDelay(temp.DeferCount)
+	until := time.Now().Add(delay)
+	count := temp.DeferCount + 1
+
+	if err := funcCallRegistry.taskDAO.SetTaskDelay(ctx, temp.TaskID, until, count); err != nil {
+		return fmt.Errorf("func-call-actuator: defer task for context cancel: %w", err)
+	}
+	temp.DelayUntil = &until
+	temp.DeferCount = count
+
+	container.GetTransitionStore().SetDeferred(temp.TaskID)
+
+	log.Printf("[func-call-actuator][%s] context canceled, deferred %v (round %d, until %s): %v",
+		temp.TaskID, delay, count, until.Format(time.RFC3339), cancelErr.Cause)
+	return nil
 }
 
 // deferTaskForCompression 把「上下文压缩要等前置任务」翻译成一次延后重排。
@@ -717,6 +786,18 @@ func runExecutingLoop(
 
 	result, err := chatWithToolsStreaming(ctx, llmClient, temp.TaskID, turn.ID, turn.TurnSeq, messages, tools, choice, opts)
 	if err != nil {
+		// context 取消不是业务失败：可能是任务被停止（子节点状态本身已改成
+		// stopped）、进程重启，或停止感知 guard 触发。此时绝不能 failTurn
+		// 把节点/子任务拖成 failed —— 只把当前 turn 收口为 interrupted，
+		// 抛给 funcCallImpl 顶层走延后重排等待恢复。
+		if isContextCanceled(err) {
+			reason := &contextCanceledError{Cause: err}
+			if ierr := funcCallRegistry.turnDAO.InterruptTurn(ctx, turn.ID, reason); ierr != nil {
+				log.Printf("[func-call-actuator][%s] interrupt turn %d error: %v", temp.TaskID, turn.ID, ierr)
+			}
+			publishTurnDone(temp.TaskID, turn.ID, turn.TurnSeq)
+			return nil, reason
+		}
 		return nil, failTurn(fmt.Errorf("func-call-actuator: llm chat failed: %w", err))
 	}
 	llmResult = result

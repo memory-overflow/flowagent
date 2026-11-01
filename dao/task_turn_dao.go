@@ -200,6 +200,23 @@ func (d *TaskTurnDAO) FailTurn(ctx context.Context, turnID int64, reason error, 
 	return d.closeTurn(ctx, turnID, model.TurnStatusFailed, outputJSON, msg, extractTurnTokens(output), 0)
 }
 
+// InterruptTurn 把单个 turn 收口为 interrupted（被中断）。
+//
+// 与 FailTurn 的区别：interrupted 不表示业务失败，而是「调用被外部动作中断
+// 且未正常收尾」（典型：LLM 请求的 context 被 cancel —— 任务被停止 / 进程
+// 重启 / 停止感知 guard 触发）。调用方（functional_call 执行器）据此不改动
+// 节点/子任务状态，只把任务延后重排等待恢复。
+//
+// 与 MarkRunningTurnsInterrupted（按 taskID 全量收口）互补：这里精确收口
+// 单个刚 begin、因取消而中断的 turn，不误伤任务里其他 running 的 turn。
+func (d *TaskTurnDAO) InterruptTurn(ctx context.Context, turnID int64, reason error) error {
+	msg := ""
+	if reason != nil {
+		msg = reason.Error()
+	}
+	return d.closeTurn(ctx, turnID, model.TurnStatusInterrupted, "", msg, turnTokens{}, 0)
+}
+
 // turnTokens 一次 turn 的 token 消耗三元组。
 //
 // 三个值必须一起落库，不能只留 total：
@@ -242,7 +259,13 @@ func (d *TaskTurnDAO) closeTurn(
 	ctx context.Context, turnID int64,
 	status model.TurnStatus, outputJSON, errMsg string, tokens turnTokens, firstTokenMs int64,
 ) error {
-	db := d.getDB().WithContext(ctx)
+	// turn 收口是「必须完成」的终态写：工具/LLM 调用因 context canceled 失败时，
+	// 调用方手里往往只剩一个已被取消的 ctx。若沿用它会连带这里的 DB 查询一起
+	// cancel（load turn 返回 context canceled），导致 turn 永远停在 running、
+	// 收口失败 —— 历史重建时这些 running 的 tool turn 被跳过，前面的 assistant
+	// tool_call 变成孤儿，最终 provider 判「tool_calls 后缺对应 tool 结果」而 400。
+	// 因此这里脱离父 ctx 的取消语义，保证收口动作一定落库。
+	db := d.getDB().WithContext(context.WithoutCancel(ctx))
 
 	// 先取 start_time 计算耗时，避免依赖 DB 端函数导致方言差异
 	var turn model.TaskTurn

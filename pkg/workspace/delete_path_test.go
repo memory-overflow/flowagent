@@ -50,7 +50,7 @@ func TestDeletePathAbsoluteOutsideWorkspace(t *testing.T) {
 
 func TestDeletePathRejectsDangerousTarget(t *testing.T) {
 	wc := &Context{WorkspaceDir: t.TempDir()}
-	for _, target := range []string{"/", "/*", "~", "/etc/passwd"} {
+	for _, target := range []string{"/", "/*", "/etc/passwd"} {
 		_, err := deletePathTool().Handler(context.Background(), wc, map[string]interface{}{"path": target})
 		if err == nil || !strings.Contains(err.Error(), "危险目标") {
 			t.Fatalf("目标 %q 应被安全策略拦截，err=%v", target, err)

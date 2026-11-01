@@ -372,7 +372,15 @@ func buildSegmentedHistory(
 
 	// 与 buildCurrentHistory 同源：当前段同样要老化，否则缓存未命中时
 	// （首轮 / 缓存被清）会退化成全量回放。
-	return out, mergeAdjacentUsers(sortToolResultsByIndex(dropOrphanToolResults(ageCurrentToolResults(currentMsgs)))), nil
+	//
+	// 必须和 buildCurrentHistory 一样先 dropOrphanToolCalls 再 dropOrphanToolResults：
+	// 主对话（非 Isolated）路径下，进程重启后可能有 tool_call turn 永久卡在
+	// running（工具执行随进程消失、turn 记录未收口），turnToMessage 对 running
+	// 的 tool turn 返回 false、不产出结果消息，于是它对应的 assistant tool_call
+	// 成了孤儿。若漏掉 dropOrphanToolCalls，这条孤儿会一路带到 provider，
+	// Azure/OpenAI 判「tool_calls 后必须跟对应 tool 结果」而 400（call_xxx 缺响应）。
+	return out, mergeAdjacentUsers(sortToolResultsByIndex(
+		dropOrphanToolResults(dropOrphanToolCalls(ageCurrentToolResults(currentMsgs))))), nil
 }
 
 // flattenSegments 把分段历史拍平成消息列表。

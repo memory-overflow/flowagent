@@ -209,3 +209,38 @@ func TestHasToolCallTurnAfter_CountsFinished(t *testing.T) {
 		t.Error("turn_seq <= afterSeq 不应算已执行")
 	}
 }
+
+// TestCloseTurn_SurvivesCanceledContext 收口 turn 时父 ctx 已取消也要落库。
+//
+// 根因回归：工具执行超时/被取消（context canceled）时，调用方拿着已取消的
+// ctx 去 FailTurn 收口，旧实现里 closeTurn 沿用该 ctx 导致 load turn 返回
+// context canceled、收口失败，turn 永远停在 running。历史重建时 running 的
+// tool turn 被 turnToMessage 跳过，前面的 assistant tool_call 变成孤儿，
+// 最终 provider 判「tool_calls 后缺对应 tool 结果」而 400（call_xxx 缺响应）。
+func TestCloseTurn_SurvivesCanceledContext(t *testing.T) {
+	db := openTurnIdempotentTestDB(t)
+	d := &TaskTurnDAO{Tx: db}
+
+	// 先建一条 running 的 turn（模拟工具执行中）
+	mkToolCallTurn(t, db, "task-canceled", 1, model.TurnStatusRunning)
+	var turn model.TaskTurn
+	if err := db.Where("task_id = ?", "task-canceled").First(&turn).Error; err != nil {
+		t.Fatalf("load turn: %v", err)
+	}
+
+	// 用已取消的 ctx 收口 —— 必须成功，不能被 context canceled 连带失败
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := d.FailTurn(canceled, turn.ID, context.Canceled, nil); err != nil {
+		t.Fatalf("取消的 ctx 下收口 turn 失败: %v", err)
+	}
+
+	// 校验 turn 确实被收口为 failed（而非停在 running）
+	var after model.TaskTurn
+	if err := db.Select("status").Where("id = ?", turn.ID).First(&after).Error; err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+	if after.Status != model.TurnStatusFailed {
+		t.Fatalf("turn 状态 = %d, want failed(%d) —— 收口未落库", after.Status, model.TurnStatusFailed)
+	}
+}

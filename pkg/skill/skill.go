@@ -17,7 +17,6 @@ package skill
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -68,7 +67,7 @@ func DetectDangerousCommand(input string) string {
 
 // detectDangerousCommand 检测 input 中的危险删除命令。
 // 命中返回拦截原因，否则返回空串。安全判断基于 rm 的实际删除目标，普通目录
-// 即使使用 -rf 也允许；文件系统根、家目录和关键系统路径仍会被拦截。
+// 即使使用 -rf 也允许；文件系统根和关键系统路径仍会被拦截。
 func detectDangerousCommand(input string) string {
 	for _, m := range rmCmdRe.FindAllStringSubmatch(input, -1) {
 		if len(m) < 2 {
@@ -110,19 +109,15 @@ var dangerousDeleteRoots = []string{
 	"/home", "/root",
 }
 
-// DetectDangerousDeleteTarget 判断单个删除目标是否属于根、根通配、家目录或关键
-// 系统路径。native delete_path 与 run_command 共用此函数，避免两条删除通道策略漂移。
+// DetectDangerousDeleteTarget 判断单个删除目标是否属于根、根通配或关键系统路径。
+// native delete_path 与 run_command 共用此函数，避免两条删除通道策略漂移。
+//
+// 注意：用户家目录（~/ 及其展开后的绝对路径）不在拦截之列 —— 已按需求放宽，
+// 只保留对文件系统根与关键系统路径（/etc、/usr、/System 等）的最硬保护。
 func DetectDangerousDeleteTarget(target string) string {
 	raw := strings.Trim(strings.TrimSpace(target), `"'`)
 	if raw == "" {
 		return ""
-	}
-
-	// shell 尚未展开的家目录/环境变量写法必须先拦截。
-	upper := strings.ToUpper(raw)
-	if raw == "~" || strings.HasPrefix(raw, "~/") || upper == "$HOME" ||
-		strings.HasPrefix(upper, "$HOME/") || upper == "${HOME}" || strings.HasPrefix(upper, "${HOME}/") {
-		return "目标位于用户家目录"
 	}
 
 	// 根目录通配在 filepath.Clean 前判断；覆盖 /*、/.*、/** 等变体。
@@ -140,12 +135,6 @@ func DetectDangerousDeleteTarget(target string) string {
 	for _, root := range dangerousDeleteRoots {
 		if clean == root || strings.HasPrefix(clean, root+string(filepath.Separator)) {
 			return "目标位于关键系统路径 " + root
-		}
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		home = filepath.Clean(home)
-		if clean == home || strings.HasPrefix(clean, home+string(filepath.Separator)) {
-			return "目标位于用户家目录"
 		}
 	}
 	return ""
