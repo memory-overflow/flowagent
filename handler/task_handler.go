@@ -396,7 +396,7 @@ func RetryWorkflowNode(ctx *gin.Context, req interface{}) (interface{}, error) {
 			}
 		}
 
-		progress, err := resetWorkflowNodeForRetry(&dag, r.NodeID)
+		progress, resumeTaskID, err := resetWorkflowNodeForRetry(&dag, r.NodeID)
 		if err != nil {
 			return nil, &APIError{Code: http.StatusBadRequest, Msg: err.Error()}
 		}
@@ -412,6 +412,13 @@ func RetryWorkflowNode(ctx *gin.Context, req interface{}) (interface{}, error) {
 			ExpectVersion: cur.DAGVersion,
 		})
 		if err == nil {
+			// DAG 写回成功后，复活目标节点的旧子任务：从失败 stage 断点续跑，
+			// 保留其已产生的 turn 历史，而不是重建子任务从头重跑。
+			if resumeTaskID != "" {
+				if err := reviveWorkflowSubTask(ctx, taskDAO, resumeTaskID); err != nil {
+					return nil, err
+				}
+			}
 			return nil, nil
 		}
 		if !errors.Is(err, dao.ErrWorkflowVersionConflict) {
@@ -458,6 +465,31 @@ func resumeStageForFailedTask(failedStage int) model.TaskStage {
 	}
 }
 
+// reviveWorkflowSubTask 复活工作流节点失败后的子任务，实现「从失败 turn 断点续跑」。
+//
+// 单节点重试时，目标失败节点保留了对旧子任务的引用（见 resetWorkflowNodeForRetry），
+// 这里把那个旧子任务从 failed 终态复活为 queued + resume stage，并恢复其 task_temp，
+// 让它重新被 functional_call 调度器捞起。因为旧子任务的 turn 历史（task_turn 表）
+// 仍关联在它的 task_id 下，续跑时历史重建会过滤掉非 success 的失败 turn，
+// 因此只会从失败的那一步继续，不会把已经成功的推理/工具调用再跑一遍。
+//
+// 子任务记录缺失（被人工清理）时跳过：编排器 driveWorkflow 发现节点 TaskID 指向
+// 不存在的子任务会把它标失败，与「从头重跑」相比不会更糟。
+func reviveWorkflowSubTask(ctx context.Context, taskDAO *dao.TaskDAO, subTaskID string) error {
+	subTask, err := taskDAO.GetTaskByID(ctx, subTaskID)
+	if err != nil {
+		return err
+	}
+	if subTask == nil {
+		return nil
+	}
+	resumeStage := resumeStageForFailedTask(subTask.Stage)
+	if err := taskDAO.RetrySubTask(ctx, subTaskID, resumeStage); err != nil {
+		return err
+	}
+	return nil
+}
+
 // resetWorkflowNodesForRetry 重试前重置 DAG 节点状态，返回重算后的进度。
 //
 // 规则：
@@ -490,13 +522,21 @@ func resetWorkflowNodesForRetry(dag *model.WorkflowOutputData) float64 {
 }
 
 // resetWorkflowNodeForRetry 重置指定节点及其下游（依赖它的节点，含传递依赖），
-// 保留其余节点。返回重算后的进度。
+// 保留其余节点。返回重算后的进度，以及目标节点旧子任务引用（若非空，说明
+// 该节点有可断点续跑的子任务）。
 //
 // 与 resetWorkflowNodesForRetry 的区别：后者是「整工作流重试」——保留全部
 // 已完成节点、重置所有失败/未完成节点；本函数是「单节点重试」——只重置用户
 // 指定的那个节点和它的下游，其他分支（包括不相关的失败节点）保持原样，
 // 由用户逐个处理。「从失败位置开始」的语义由此实现：已完成的上游不重跑。
-func resetWorkflowNodeForRetry(dag *model.WorkflowOutputData, nodeID string) (float64, error) {
+//
+// 目标节点与下游节点的重置方式不同：
+//   - 目标节点：它是真正失败的那个，其旧子任务（TaskID 指向）有完整的 turn
+//     历史，保留引用、只重置状态为 queued，让旧子任务从失败 stage 断点续跑，
+//     而不是重建子任务从头重跑；
+//   - 下游节点：它们的子任务是被级联停止的（turn 不完整），清空 TaskID/Output
+//     让编排器重建。
+func resetWorkflowNodeForRetry(dag *model.WorkflowOutputData, nodeID string) (float64, string, error) {
 	// 1. 定位目标节点的 NodeID（node_id 或子任务 task_id 均可）
 	targetNodeID := ""
 	for _, n := range dag.Nodes {
@@ -506,7 +546,7 @@ func resetWorkflowNodeForRetry(dag *model.WorkflowOutputData, nodeID string) (fl
 		}
 	}
 	if targetNodeID == "" {
-		return 0, fmt.Errorf("节点不存在: %s", nodeID)
+		return 0, "", fmt.Errorf("节点不存在: %s", nodeID)
 	}
 
 	// 2. 计算下游集合（直接/间接依赖目标节点的节点），迭代到收敛
@@ -530,15 +570,26 @@ func resetWorkflowNodeForRetry(dag *model.WorkflowOutputData, nodeID string) (fl
 	// 3. 重置目标节点 + 下游，保留其余（含已完成上游与其他分支）
 	total := dag.ActiveNodeCount()
 	if total == 0 {
-		return 0, nil
+		return 0, "", nil
 	}
 	completed := 0
+	var resumeTaskID string
 	for i := range dag.Nodes {
 		n := &dag.Nodes[i]
 		if n.Archived {
 			continue
 		}
+		if n.NodeID == targetNodeID {
+			// 目标失败节点：保留旧子任务引用，让它在重试后从失败 stage
+			// 断点续跑（保留已产生的 turn 历史）。Output 也保留——
+			// partial_failed 节点可能已有部分产物，续跑后还能继续引用。
+			resumeTaskID = n.TaskID
+			n.Status = model.TaskStatusQueued
+			continue
+		}
 		if downstream[n.NodeID] {
+			// 下游节点：依赖目标节点，其旧子任务已被级联停止、turn 不完整，
+			// 清空 TaskID/Output 让编排器重建。
 			n.Status = model.TaskStatusQueued
 			n.TaskID = ""
 			n.Output = nil
@@ -548,7 +599,7 @@ func resetWorkflowNodeForRetry(dag *model.WorkflowOutputData, nodeID string) (fl
 			completed++
 		}
 	}
-	return float64(completed) / float64(total) * 100.0, nil
+	return float64(completed) / float64(total) * 100.0, resumeTaskID, nil
 }
 
 // ============================================================

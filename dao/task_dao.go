@@ -395,15 +395,31 @@ func (d *TaskDAO) RetryConversationTask(ctx context.Context, taskID string, resu
 			return nil
 		}
 
-		var task model.Task
-		if err := tx.Where("task_id = ?", taskID).First(&task).Error; err != nil {
-			return fmt.Errorf("reload conversation task for retry revive failed: %w", err)
-		}
-		if err := tx.Create(&model.TaskTemp{Task: task}).Error; err != nil {
-			return fmt.Errorf("revive conversation task_temp for retry failed: %w", err)
-		}
-		return nil
-	})
+	var task model.Task
+	if err := tx.Where("task_id = ?", taskID).First(&task).Error; err != nil {
+		return fmt.Errorf("reload conversation task for retry revive failed: %w", err)
+	}
+	if err := tx.Create(&model.TaskTemp{Task: task}).Error; err != nil {
+		return fmt.Errorf("revive conversation task_temp for retry failed: %w", err)
+	}
+	return nil
+})
+}
+
+// RetrySubTask 复活一个失败的工作流节点子任务（workflow_subtask），从失败发生
+// 的 stage 断点续跑。
+//
+// 与 RetryConversationTask 语义相同：单节点重试时，目标失败节点的旧子任务保留
+// 了对它的引用（见 handler 的 resetWorkflowNodeForRetry），这里把它从 failed 终态
+// 复活为 queued + resumeStage，并恢复 task_temp，让它重新被 functional_call 调度器
+// 捞起。旧子任务的 turn 历史（task_turn 表）仍关联在它的 task_id 下，续跑时历史
+// 重建会过滤掉非 success 的失败 turn，因此只会从失败的那一步继续，不会把已经成功
+// 的推理 / 工具调用再跑一遍。
+//
+// 子任务与对话任务在 task/task_temp 表结构上完全一致，续跑逻辑复用
+// RetryConversationTask 即可，无需单独维护一份。
+func (d *TaskDAO) RetrySubTask(ctx context.Context, taskID string, resumeStage model.TaskStage) error {
+	return d.RetryConversationTask(ctx, taskID, resumeStage)
 }
 
 // GetTaskByID 根据任务 ID 获取任务（优先查临时表，再由终态兜底）

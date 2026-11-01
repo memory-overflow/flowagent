@@ -76,7 +76,7 @@ func TestResetWorkflowNodeForRetry(t *testing.T) {
 		{NodeID: "n4", Status: model.TaskStatusFailed, TaskID: "sub-4", DependsOn: []string{"n1"}},
 	}}
 
-	progress, err := resetWorkflowNodeForRetry(dag, "n2")
+	progress, resumeTaskID, err := resetWorkflowNodeForRetry(dag, "n2")
 	if err != nil {
 		t.Fatalf("reset node failed: %v", err)
 	}
@@ -88,11 +88,16 @@ func TestResetWorkflowNodeForRetry(t *testing.T) {
 	if dag.Nodes[0].Status != model.TaskStatusCompleted || dag.Nodes[0].TaskID != "sub-1" {
 		t.Errorf("upstream completed node must be kept, got %+v", dag.Nodes[0])
 	}
-	if dag.Nodes[1].Status != model.TaskStatusQueued || dag.Nodes[1].TaskID != "" {
-		t.Errorf("target node must be reset, got %+v", dag.Nodes[1])
+	// 目标失败节点：保留旧子任务引用（sub-2）以便断点续跑，只重置状态为 queued
+	if dag.Nodes[1].Status != model.TaskStatusQueued || dag.Nodes[1].TaskID != "sub-2" {
+		t.Errorf("target node must keep its subtask ref and reset to queued, got %+v", dag.Nodes[1])
 	}
+	if resumeTaskID != "sub-2" {
+		t.Errorf("resumeTaskID = %q, want sub-2", resumeTaskID)
+	}
+	// 下游节点：清空 TaskID，由编排器重建
 	if dag.Nodes[2].Status != model.TaskStatusQueued || dag.Nodes[2].TaskID != "" {
-		t.Errorf("downstream node must be reset, got %+v", dag.Nodes[2])
+		t.Errorf("downstream node must be reset and detached, got %+v", dag.Nodes[2])
 	}
 	if dag.Nodes[3].Status != model.TaskStatusFailed || dag.Nodes[3].TaskID != "sub-4" {
 		t.Errorf("unrelated failed node must be kept, got %+v", dag.Nodes[3])
@@ -102,11 +107,29 @@ func TestResetWorkflowNodeForRetry(t *testing.T) {
 	dag2 := &model.WorkflowOutputData{Nodes: []model.WorkflowNodeData{
 		{NodeID: "n1", Status: model.TaskStatusFailed, TaskID: "sub-1"},
 	}}
-	if _, err := resetWorkflowNodeForRetry(dag2, "sub-1"); err != nil {
+	if _, _, err := resetWorkflowNodeForRetry(dag2, "sub-1"); err != nil {
 		t.Errorf("retry by task_id should work, got %v", err)
 	}
 	// 不存在的节点报错
-	if _, err := resetWorkflowNodeForRetry(dag2, "nope"); err == nil {
+	if _, _, err := resetWorkflowNodeForRetry(dag2, "nope"); err == nil {
 		t.Error("unknown node should error")
+	}
+}
+
+// TestResetWorkflowNodeForRetry_NoSubTask 目标失败节点没有旧子任务引用（如子任务
+// 创建时就失败）时，resumeTaskID 应为空，走编排器重建路径。
+func TestResetWorkflowNodeForRetry_NoSubTask(t *testing.T) {
+	dag := &model.WorkflowOutputData{Nodes: []model.WorkflowNodeData{
+		{NodeID: "n1", Status: model.TaskStatusFailed, TaskID: ""},
+	}}
+	_, resumeTaskID, err := resetWorkflowNodeForRetry(dag, "n1")
+	if err != nil {
+		t.Fatalf("reset node failed: %v", err)
+	}
+	if resumeTaskID != "" {
+		t.Errorf("resumeTaskID = %q, want empty when node has no subtask", resumeTaskID)
+	}
+	if dag.Nodes[0].Status != model.TaskStatusQueued {
+		t.Errorf("node must be reset to queued, got %+v", dag.Nodes[0])
 	}
 }
