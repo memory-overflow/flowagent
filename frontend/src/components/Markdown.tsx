@@ -1,9 +1,12 @@
-import { createContext, useContext, useState } from 'react';
+import { createContext, memo, useContext, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { FileInfo } from '../types/api';
 import FilePreview from './FilePreview';
 import { useT } from '../i18n';
+
+/** GFM 插件数组提到模块级：避免每次渲染新建数组导致 ReactMarkdown 认为入参变化 */
+const REMARK_PLUGINS = [remarkGfm];
 
 /**
  * 对话工作区上下文：由页面层（ChatPage 等）提供当前对话的 chat_id。
@@ -69,73 +72,87 @@ interface Props {
  *  - 相对路径（如 outputs/report.md）：视为工作区文件链接，拦截默认导航，
  *    在应用内弹 FilePreview 预览（chat_id 缺失时仅拦截，不响应）。
  */
-export default function Markdown({ children, compact = false, className }: Props) {
+export default memo(function Markdown({ children, compact = false, className }: Props) {
   const t = useT();
   const chatId = useContext(MarkdownWorkspaceContext);
   const [previewFile, setPreviewFile] = useState<FileInfo | null>(null);
+
+  // normalizeCjkBold 是对整段正文跑正则；正文不变时没必要重复计算
+  const normalized = useMemo(() => normalizeCjkBold(children), [children]);
 
   const cls = ['markdown-body', compact ? 'markdown-compact' : '', className]
     .filter(Boolean)
     .join(' ');
 
+  /**
+   * components 必须是稳定引用。
+   * 内联对象每次渲染都会新建，ReactMarkdown 会认为渲染规则变了而重新解析 AST；
+   * 这里按 chatId / 翻译函数缓存，正文不变时整棵 AST 可以复用。
+   */
+  const components = useMemo(
+    () => ({
+      a: ({ node, href, children, ...props }: any) => {
+        // 模型经常脑补 sandbox:/、file:// 这类「假协议」前缀（本质是工作区
+        // 相对路径前面加了沙箱协议）。剥掉还原成相对路径，否则点击会触发
+        // 浏览器协议导航失败 → SPA 路由兜底 → 跳到任务页/主页。
+        const normalizedHref = href
+          ? href.replace(/^(?:sandbox|mnt):\/+/i, '').replace(/^file:\/+/i, '')
+          : href;
+        // 协议化链接（http:/https:/mailto:/...）或页内锚点：维持外链行为
+        if (
+          !normalizedHref ||
+          /^[a-z][a-z0-9+.-]*:/i.test(normalizedHref) ||
+          normalizedHref.startsWith('#')
+        ) {
+          return (
+            <a {...props} href={normalizedHref} target="_blank" rel="noreferrer noopener">
+              {children}
+            </a>
+          );
+        }
+        // 相对路径：工作区文件链接，点击走应用内预览而非页面导航。
+        //
+        // 必须先解码：react-markdown 会把链接地址里的非 ASCII 字符百分号编码
+        // （「飞书」→「%E9%A3%9E%E4%B9%A6」）。不解码的话下面 encodeURIComponent
+        // 会再编码一次（% → %25），后端只解一次，拿到的 path 是字面量
+        // 「outputs/%E9%A3%9E...」，文件不存在 → 预览「内容读取失败」。
+        // 中文文件名在本项目是常态（LLM 产物大多是中文名），不能漏。
+        let decoded = normalizedHref;
+        try {
+          decoded = decodeURIComponent(normalizedHref);
+        } catch {
+          // 非法编码（如路径里本身含孤立的 %）保持原样
+        }
+        const relPath = decoded.replace(/^\.\//, '');
+        return (
+          <a
+            {...props}
+            href={relPath}
+            title={chatId ? t('files.previewX', { name: relPath }) : relPath}
+            onClick={(e) => {
+              e.preventDefault();
+              if (!chatId) return;
+              const name = relPath.split('/').pop() || relPath;
+              setPreviewFile({
+                source: 'local',
+                name,
+                path: relPath,
+                url: `/api/v1/files/download?chat_id=${encodeURIComponent(chatId)}&path=${encodeURIComponent(relPath)}`,
+              });
+            }}
+          >
+            {children}
+          </a>
+        );
+      },
+    }),
+    [chatId, t],
+  );
+
   return (
     <div className={cls}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a: ({ node, href, children, ...props }) => {
-            // 模型经常脑补 sandbox:/、file:// 这类「假协议」前缀（本质是工作区
-            // 相对路径前面加了沙箱协议）。剥掉还原成相对路径，否则点击会触发
-            // 浏览器协议导航失败 → SPA 路由兜底 → 跳到任务页/主页。
-            const normalized = href
-              ? href.replace(/^(?:sandbox|mnt):\/+/i, '').replace(/^file:\/+/i, '')
-              : href;
-            // 协议化链接（http:/https:/mailto:/...）或页内锚点：维持外链行为
-            if (!normalized || /^[a-z][a-z0-9+.-]*:/i.test(normalized) || normalized.startsWith('#')) {
-              return (
-                <a {...props} href={normalized} target="_blank" rel="noreferrer noopener">
-                  {children}
-                </a>
-              );
-            }
-            // 相对路径：工作区文件链接，点击走应用内预览而非页面导航。
-            //
-            // 必须先解码：react-markdown 会把链接地址里的非 ASCII 字符百分号编码
-            // （「飞书」→「%E9%A3%9E%E4%B9%A6」）。不解码的话下面 encodeURIComponent
-            // 会再编码一次（% → %25），后端只解一次，拿到的 path 是字面量
-            // 「outputs/%E9%A3%9E...」，文件不存在 → 预览「内容读取失败」。
-            // 中文文件名在本项目是常态（LLM 产物大多是中文名），不能漏。
-            let decoded = normalized;
-            try {
-              decoded = decodeURIComponent(normalized);
-            } catch {
-              // 非法编码（如路径里本身含孤立的 %）保持原样
-            }
-            const relPath = decoded.replace(/^\.\//, '');
-            return (
-              <a
-                {...props}
-                href={relPath}
-                title={chatId ? t('files.previewX', { name: relPath }) : relPath}
-                onClick={(e) => {
-                  e.preventDefault();
-                  if (!chatId) return;
-                  const name = relPath.split('/').pop() || relPath;
-                  setPreviewFile({
-                    source: 'local',
-                    name,
-                    path: relPath,
-                    url: `/api/v1/files/download?chat_id=${encodeURIComponent(chatId)}&path=${encodeURIComponent(relPath)}`,
-                  });
-                }}
-              >
-                {children}
-              </a>
-            );
-          },
-        }}
-      >
-        {normalizeCjkBold(children)}
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
+        {normalized}
       </ReactMarkdown>
 
       {previewFile && (
@@ -143,4 +160,4 @@ export default function Markdown({ children, compact = false, className }: Props
       )}
     </div>
   );
-}
+});
