@@ -41,17 +41,20 @@ func TestRunCommandTimeoutReturns(t *testing.T) {
 	run := runCommandTool()
 
 	start := time.Now()
-	_, err := run.Handler(context.Background(), wc, map[string]interface{}{
+	out, err := run.Handler(context.Background(), wc, map[string]interface{}{
 		"cmd":             `sleep 30 & wait`,
 		"timeout_seconds": 2,
 	})
 	elapsed := time.Since(start)
 
-	if err == nil {
-		t.Fatal("超时应返回错误，实际返回成功")
+	if err != nil {
+		t.Fatalf("超时不应作为错误返回（应作为结果回喂让模型重新规划），got %v", err)
 	}
-	if !strings.Contains(err.Error(), "被强制终止") {
-		t.Fatalf("错误信息应说明被强制终止，got %v", err)
+	if !strings.Contains(out, "被强制终止") {
+		t.Fatalf("结果应说明被强制终止，got %q", out)
+	}
+	if !strings.Contains(out, "重新规划") {
+		t.Fatalf("结果应引导模型重新规划，got %q", out)
 	}
 	// 2s 超时 + 少量调度开销；若仍等到 30s 说明 pipe 阻塞问题没修好。
 	if elapsed > 10*time.Second {
@@ -67,12 +70,15 @@ func TestRunCommandTimeoutKillsChildren(t *testing.T) {
 
 	// 用一个独特的 sleep 秒数当标记，便于事后 pgrep 确认进程是否残留。
 	marker := "sleep 47"
-	_, err := run.Handler(context.Background(), wc, map[string]interface{}{
+	out, err := run.Handler(context.Background(), wc, map[string]interface{}{
 		"cmd":             marker + " & wait",
 		"timeout_seconds": 1,
 	})
-	if err == nil {
-		t.Fatal("超时应返回错误")
+	if err != nil {
+		t.Fatalf("超时应作为结果返回，got %v", err)
+	}
+	if !strings.Contains(out, "被强制终止") {
+		t.Fatalf("结果应说明被强制终止，got %q", out)
 	}
 	// 给 kill 一点落地时间
 	time.Sleep(500 * time.Millisecond)
@@ -81,11 +87,11 @@ func TestRunCommandTimeoutKillsChildren(t *testing.T) {
 	// 若用裸子串匹配，pgrep -f 会误匹配到「正在执行本检查的 sh -c 进程自己」
 	// （它的 cmdline 里也含 "sleep 47"），Linux(dash) 下会一直算出 1 个残留。
 	count := exec.Command("sh", "-c", fmt.Sprintf(`pgrep -f '^%s$' | wc -l`, marker))
-	out, pErr := count.Output()
+	pgrepOut, pErr := count.Output()
 	if pErr != nil {
 		t.Skipf("当前环境无法用 pgrep 校验残留进程: %v", pErr)
 	}
-	if n := strings.TrimSpace(string(out)); n != "0" {
+	if n := strings.TrimSpace(string(pgrepOut)); n != "0" {
 		t.Fatalf("超时后仍有 %s 个残留进程（孙进程未被杀死）", n)
 	}
 }
@@ -96,15 +102,15 @@ func TestRunCommandTimeoutOutputKept(t *testing.T) {
 	wc := &Context{WorkspaceDir: m.Dir("wf-timeout-out")}
 	run := runCommandTool()
 
-	_, err := run.Handler(context.Background(), wc, map[string]interface{}{
+	out, err := run.Handler(context.Background(), wc, map[string]interface{}{
 		"cmd":             `echo "progress-marker"; sleep 30 & wait`,
 		"timeout_seconds": 1,
 	})
-	if err == nil {
-		t.Fatal("超时应返回错误")
+	if err != nil {
+		t.Fatalf("超时应作为结果返回，got %v", err)
 	}
-	if !strings.Contains(err.Error(), "progress-marker") {
-		t.Fatalf("超时错误应带上已产出的输出，got %v", err)
+	if !strings.Contains(out, "progress-marker") {
+		t.Fatalf("超时结果应带上已产出的输出，got %q", out)
 	}
 }
 

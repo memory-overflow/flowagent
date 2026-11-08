@@ -153,46 +153,15 @@ func (a *WorkflowActuator) reapOrphanSubTasks(ctx context.Context, ids []string)
 	}
 }
 
-// stopAbandonedSubTasks 停掉「刚被归档为 Abandoned 的下游节点」仍在跑的子任务。
-//
-// 与 stopSubTasks（停整棵子树）的区别：这里只停失败节点下游的、已经创建了
-// 子任务但尚未终态的那些节点 —— 它们上游已失败、依赖永远无法满足，继续跑
-// 只会空耗。不依赖失败节点的独立分支不受影响，照常推进。
-//
-// 节点被 pruneAbandonedBranch 归档后，其未终态的后代会置为 Abandoned（含
-// TaskID 已在跑的子任务）。本方法把这些 Abandoned 节点对应的子任务（含其
-// 孙层，如 deep_search 派发的搜索子任务）收口为 stopped，避免「工作流失败
-// 分支已废弃、搜索还在跑」的残留。
-func (a *WorkflowActuator) stopAbandonedSubTasks(ctx context.Context, nodes []model.WorkflowNodeData) {
-	for i := range nodes {
-		n := &nodes[i]
-		if n.Status != model.TaskStatusAbandoned || n.TaskID == "" {
-			continue
-		}
-		pendings, err := a.taskDAO.ListActiveDescendants(ctx, n.TaskID)
-		if err != nil {
-			log.Printf("[workflow-actuator] list descendants of abandoned node %s: %v", n.NodeID, err)
-			continue
-		}
-		for _, st := range pendings {
-			if err := a.taskDAO.UpdateTaskStatus(ctx, st.TaskID, model.TaskStatusStopped, nil, 0); err != nil {
-				log.Printf("[workflow-actuator] stop abandoned node %s subtask %s failed: %v",
-					n.NodeID, st.TaskID, err)
-			}
-		}
-		if len(pendings) > 0 {
-			log.Printf("[workflow-actuator] stopped %d descendant(s) of abandoned node %s",
-				len(pendings), n.NodeID)
-		}
-	}
-}
-
 // GetAsyncTaskStatus 周期推进 DAG：扫描子任务终态，驱动下游节点，回写 DAG。
 //
 // 返回每个工作流任务的异步状态：
-//   - 任一节点失败       → FAILED（并触发 Stop 终止其余子任务）
-//   - 所有节点完成       → SUCCESS
-//   - 否则               → RUNNING
+//   - 有节点失败、且失败分支之外的可推进节点都已跑完 → FAILED（失败节点保留，可重试）
+//   - 所有节点完成                                    → SUCCESS
+//   - 否则                                            → RUNNING
+//
+// 执行期失败不归档、不废弃：失败节点保持 failed、其下游停在 queued 等重试。
+// 「废弃」只在续接规划时发生（appendWorkflowNodes → pruneAbandonedBranch）。
 func (a *WorkflowActuator) GetAsyncTaskStatus(
 	ctx context.Context, tasks []framework.Task,
 ) ([]framework.AsyncTaskStatus, error) {
@@ -324,28 +293,12 @@ func (a *WorkflowActuator) driveWorkflow(
 		}
 	}
 
-	// Phase 1.5：失败分支归档 —— 有节点失败时，剪掉「失败节点 + 其下游」，
-	// 让不依赖失败节点的独立分支继续跑，而不是无差别停掉整棵子树。
-	//
-	// 为什么在这里而不是末尾的 anyFailed 分支：归档会改变 active 口径
-	// （ActiveNodeCount 排除 Archived），必须在 Phase 2 创建子任务前完成，
-	// 否则下游的 queued 节点会被当「依赖已满足」而错误地创建子任务；
-	// 也必须在进度计算前完成，否则失败分支永远拖住收敛。
-	//
-	// 剪枝后独立分支照常推进，工作流最终按「有失败 + 有完成 → 部分失败」
-	// 收口，而非一刀切判失败。
-	if anyFailed {
-		pruned := pruneAbandonedBranch(dag)
-		if pruned > 0 {
-			changed = true
-			log.Printf("[workflow-actuator][%s] pruned %d node(s) on failed branch (independent branches continue)",
-				wfTask.TaskID, pruned)
-			// 归档后 active 口径缩小，重算一次：失败分支不再计入收敛与进度。
-			active = dag.ActiveNodeCount()
-		}
-		// 停掉被归档下游仍在跑的子任务（不碰独立分支）。
-		a.stopAbandonedSubTasks(ctx, nodes)
-	}
+	// 执行期节点失败**不归档、不废弃**：失败节点保持 failed（用户可单独重试），
+	// 其下游保持 queued 等上游重试成功后继续。工作流是否收口为 FAILED 由本函数
+	// 末尾按 AllRunnableSettled 判定 —— 失败分支不参与「必须全部完成」的分母，
+	// 所以不会卡在 RUNNING。真正的「废弃」只发生在续接规划时（见
+	// workflow_binding.appendWorkflowNodes 里的 pruneAbandonedBranch），那时用户
+	// 已选择基于成功节点重规划，失败分支才退出调度与上下文。
 
 	// Phase 2：为「依赖已全部完成」的节点创建子任务。
 	// 节点按声明顺序遍历即可 —— 本轮新建子任务的节点其依赖尚未完成
@@ -404,18 +357,24 @@ func (a *WorkflowActuator) driveWorkflow(
 	}
 	progress := float64(completed) / float64(active) * 100.0
 
+	// 收敛判定：执行期失败节点不归档（保持 failed + 可重试），其下游停在
+	// queued 等重试；续接废弃的分支已被归档。两者都不能算进「必须全部完成」
+	// 的分母，否则工作流会因它们永远卡在 RUNNING。AllRunnableSettled 用
+	// DeadNodeSet 把这些分支排除，只看真正可推进的节点是否都已收尾。
+	allRunnableSettled := dag.AllRunnableSettled()
+
 	// 工作流整体状态（与本函数末尾返回给框架的判定保持同一口径）：
 	// 来源对话任务的状态绑定要用它落规则 3 ——「节点没跑完但工作流已整体失败」。
 	//
-	// 注意 anyFailed 不再无条件落 Failed：失败分支已归档，独立分支可能仍在跑。
-	// 独立分支没跑完时工作流仍是 running（来源任务经 DeriveBoundTaskStatus 规则 2
-	// 会独立识别「绑定节点里有 failed」而正确判失败，不依赖这里的整体口径）。
+	// anyFailed 不无条件落 Failed：独立分支可能仍在跑，要等它们把产物做完整。
+	// 来源任务经 DeriveBoundTaskStatus 规则 2 会独立识别「绑定节点里有 failed」
+	// 而正确判失败，不依赖这里的整体口径。
 	wfStatus := model.TaskStatusRunning
 	switch {
 	case anyStopped:
 		wfStatus = model.TaskStatusStopped
-	case anyFailed && completed == active:
-		// 失败分支已归档、独立分支也全部终态 → 整体失败。
+	case anyFailed && allRunnableSettled:
+		// 失败分支之外的可推进节点也都收尾 → 整体失败，等用户重试失败节点。
 		wfStatus = model.TaskStatusFailed
 	case completed == active:
 		wfStatus = model.TaskStatusCompleted
@@ -485,13 +444,12 @@ func (a *WorkflowActuator) driveWorkflow(
 			Progress:   progress,
 		}, nil
 	case anyFailed:
-		// 有节点失败，但失败分支已在 Phase 1.5 归档、其下游子任务已停。
+		// 有节点失败：失败节点保持 failed、其下游保持 queued（不归档、不停止，
+		// 用户点「重试此节点」后 resetWorkflowNodeForRetry 重新激活它们）。
 		// 关键：不在这里 stopSubTasks（那会无差别连坐独立分支）—— 独立分支
-		// 只要还有活跃节点没跑完，工作流就继续 RUNNING，让它们把产物做完整；
-		// 等所有活跃节点都终态，再收口为 FAILED（失败分支的失败事实由
-		// 归档标记 + 节点 failed 状态承载，来源任务经 DeriveBoundTaskStatus
-		// 规则 2 独立判失败，不依赖这里的整体状态）。
-		if completed < active {
+		// 只要还有节点没跑完，工作流就继续 RUNNING；等所有可推进节点都终态，
+		// 再收口为 FAILED。
+		if !allRunnableSettled {
 			return framework.AsyncTaskStatus{
 				TaskStatus: framework.TASK_STATUS_RUNNING,
 				Progress:   progress,

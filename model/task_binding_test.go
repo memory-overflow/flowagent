@@ -80,3 +80,55 @@ func TestDeriveBoundTaskStatusProgress(t *testing.T) {
 		t.Fatalf("空节点集 = (%d, %.0f), want (completed, 100)", st, progress)
 	}
 }
+
+// TestAllRunnableSettled 执行期失败不归档后，工作流仍能收敛而不是卡在 RUNNING：
+// 失败节点 + 其下游（queued 等重试）被排除出收敛分母，独立分支没跑完时继续等。
+func TestAllRunnableSettled(t *testing.T) {
+	cases := []struct {
+		name  string
+		nodes []WorkflowNodeData
+		want  bool
+	}{
+		{
+			name: "失败节点及其下游排队，其余已完成 → 可收口为失败",
+			nodes: []WorkflowNodeData{
+				{NodeID: "n1", Status: TaskStatusCompleted},
+				{NodeID: "n2", Status: TaskStatusFailed},
+				{NodeID: "n3", Status: TaskStatusQueued, DependsOn: []string{"n2"}},
+				{NodeID: "n4", Status: TaskStatusQueued, DependsOn: []string{"n2", "n3"}},
+			},
+			want: true,
+		},
+		{
+			name: "还有独立分支没跑完 → 继续 RUNNING",
+			nodes: []WorkflowNodeData{
+				{NodeID: "n1", Status: TaskStatusCompleted},
+				{NodeID: "n2", Status: TaskStatusFailed},
+				{NodeID: "n3", Status: TaskStatusQueued, DependsOn: []string{"n2"}},
+				{NodeID: "n5", Status: TaskStatusRunning, DependsOn: []string{"n1"}},
+			},
+			want: false,
+		},
+		{
+			name: "全部完成 → 可收口为成功",
+			nodes: []WorkflowNodeData{
+				{NodeID: "n1", Status: TaskStatusCompleted},
+				{NodeID: "n2", Status: TaskStatusCompleted, DependsOn: []string{"n1"}},
+			},
+			want: true,
+		},
+		{
+			name:  "空 DAG",
+			nodes: nil,
+			want:  true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wf := &WorkflowOutputData{Nodes: c.nodes}
+			if got := wf.AllRunnableSettled(); got != c.want {
+				t.Fatalf("AllRunnableSettled() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}

@@ -758,8 +758,19 @@ func runCommandTool() *ToolDef {
 				if detail != "" {
 					detail = "，终止前输出: " + truncateRunes(detail, 2000)
 				}
-				return "", fmt.Errorf("命令执行超过 %v 被强制终止（已终止命令及其子进程）%s",
-					timeout, detail)
+				// 上层任务被停止/取消（execCtx 随父 ctx 一起被 cancel）—— 不是命令
+				// 超时，返回错误让上层正常收口，不要伪装成「超时需要重新规划」。
+				if !errors.Is(execCtx.Err(), context.DeadlineExceeded) {
+					return "", fmt.Errorf("命令执行被取消: %w", execCtx.Err())
+				}
+				// 命令超时不是「工具故障」：把它当作结果回喂给模型，让模型看到
+				// 超时信息后重新规划（换更短/可断点续跑的命令、分步执行，或显式
+				// 放宽 timeout_seconds），而不是被上层记成 FailTurn、累加连续失败
+				// 熔断后把整个任务判失败。
+				return fmt.Sprintf(
+					"命令执行超过 %v 被强制终止（已终止命令及其子进程）%s。"+
+						"请重新规划：改用更短或可断点续跑的命令、分步执行，或显式增大 timeout_seconds 后重试。",
+					timeout, detail), nil
 			}
 
 			if runErr != nil {

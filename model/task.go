@@ -668,6 +668,26 @@ func (w *WorkflowOutputData) DeadNodeSet() map[string]bool {
 	return dead
 }
 
+// AllRunnableSettled 判断「不依赖失败/停止分支的节点」是否都已跑完。
+//
+// 执行期某个节点失败后，其下游依赖永远无法满足，会停在 queued 等用户重试；
+// 续接规划时，这些失败分支会被 pruneAbandonedBranch 归档。两种情况这些节点
+// 都不该算进「必须全部完成」的收敛分母 —— 否则工作流会永远卡在 RUNNING。
+// 执行器用本方法决定能否收口为 FAILED（见 workflow_actuator.driveWorkflow）。
+func (w *WorkflowOutputData) AllRunnableSettled() bool {
+	dead := w.DeadNodeSet()
+	for i := range w.Nodes {
+		n := &w.Nodes[i]
+		if n.Archived || dead[n.NodeID] {
+			continue
+		}
+		if n.Status != TaskStatusCompleted {
+			return false
+		}
+	}
+	return true
+}
+
 // ActiveNodeCount 参与调度与进度统计的节点数（排除已归档节点）。
 func (w *WorkflowOutputData) ActiveNodeCount() int {
 	n := 0
