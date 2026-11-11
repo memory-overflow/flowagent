@@ -380,7 +380,7 @@ func applyWorkflowPlan(
 	resp *planningLLMResp, target *planWorkflowTarget,
 	planCtx *model.WorkflowPlanContext,
 ) (*workflowPlanResult, error) {
-	newNodes := buildWorkflowNodes(resp.NewNodes, temp.TaskID)
+	newNodes := buildWorkflowNodes(resp.NewNodes, temp.TaskID, userInputText(temp))
 
 	var (
 		result *workflowPlanResult
@@ -425,9 +425,19 @@ func mergePlanContext(old, fresh *model.WorkflowPlanContext) *model.WorkflowPlan
 	return &merged
 }
 
+// userInputText 提取规划任务的用户原始输入（纯文本，不含附件清单）。
+func userInputText(temp *model.TaskTemp) string {
+	if temp == nil || temp.TaskInput.Data == nil {
+		return ""
+	}
+	return strings.TrimSpace(temp.TaskInput.Data.InputText)
+}
+
 // buildWorkflowNodes 把 LLM 给的节点转成持久化结构。
 // 节点状态一律从「排队中」起步，真正的执行状态由后续编排流程更新。
-func buildWorkflowNodes(nodes []planningLLMNode, sourceTaskID string) []model.WorkflowNodeData {
+// userInput 是提出这批节点的规划任务的用户原始输入（纯文本），
+// 落到每个节点的 UserInput，供 buildSubTaskPrompt 注入【用户原始输入】段。
+func buildWorkflowNodes(nodes []planningLLMNode, sourceTaskID string, userInput string) []model.WorkflowNodeData {
 	now := time.Now().UnixMilli()
 	out := make([]model.WorkflowNodeData, 0, len(nodes))
 	for _, n := range nodes {
@@ -437,6 +447,7 @@ func buildWorkflowNodes(nodes []planningLLMNode, sourceTaskID string) []model.Wo
 			Description:  n.Description,
 			Input:        n.Input,
 			Context:      n.Context,
+			UserInput:    userInput,
 			DependsOn:    append([]string(nil), n.DependsOn...),
 			Status:       model.TaskStatusQueued,
 			SourceTaskID: sourceTaskID,

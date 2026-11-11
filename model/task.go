@@ -383,6 +383,12 @@ type WorkflowNodeData struct {
 	// 工作流全局的「用户原始输入」是创建轮的原文，续接轮新输入只有这里能进。
 	// 注入节点 prompt 时放在【本步骤背景】段。
 	Context string `json:"context,omitempty"`
+	// UserInput 提出该节点的规划任务的用户原始输入（纯文本，不含附件清单）。
+	//
+	// 与工作流全局 TaskInput 区分：后者是「创建这条工作流的那一轮」的原文，
+	// 而续接（append）节点属于后续某轮规划，其用户原始输入是那一轮的原文。
+	// 节点 prompt 的【用户原始输入】段优先用本字段，为空才回退工作流全局。
+	UserInput string `json:"user_input,omitempty"`
 	// SourceTaskID 提出该节点的对话任务 ID。
 	// 前端据此把 DAG 节点关联回「哪一轮对话规划出来的」。
 	SourceTaskID string `json:"source_task_id,omitempty"`

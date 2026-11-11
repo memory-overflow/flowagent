@@ -661,7 +661,15 @@ func buildSubTaskPrompt(
 	// 格式要求等），所以原文必须独立注入、放在最前面，让节点先锚定用户原话，
 	// 再看概括与调研结论。丢失它的直接后果是「规划期读到的文件路径」在节点
 	// 手里消失，节点只能凭空重找。
-	if userInput := strings.TrimSpace(renderUserInput(wfTask.TaskInput.Data, "")); userInput != "" {
+	//
+	// 优先取「提出本节点的规划任务」的原文（node.UserInput）：续接（append）节点
+	// 属于后续某轮规划，其用户输入不同于工作流创建轮；为空才回退工作流全局
+	// （旧数据 / 新建工作流的节点）。
+	userInput := strings.TrimSpace(node.UserInput)
+	if userInput == "" {
+		userInput = strings.TrimSpace(renderUserInput(wfTask.TaskInput.Data, ""))
+	}
+	if userInput != "" {
 		b.WriteString("【用户原始输入】\n")
 		b.WriteString(userInput)
 		b.WriteString("\n\n")

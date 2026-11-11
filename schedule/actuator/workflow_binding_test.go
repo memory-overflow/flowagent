@@ -20,7 +20,7 @@ func TestBuildWorkflowNodes(t *testing.T) {
 			DependsOn: []string{},
 		},
 		{NodeID: "n2_write", Name: "撰写", DependsOn: []string{"n1_search"}},
-	}, "task-abc")
+	}, "task-abc", "帮我写报告")
 
 	if len(nodes) != 2 {
 		t.Fatalf("got %d nodes, want 2", len(nodes))
@@ -31,6 +31,9 @@ func TestBuildWorkflowNodes(t *testing.T) {
 		}
 		if n.SourceTaskID != "task-abc" {
 			t.Errorf("node %s source_task_id = %q, want task-abc", n.NodeID, n.SourceTaskID)
+		}
+		if n.UserInput != "帮我写报告" {
+			t.Errorf("node %s user_input = %q, want 帮我写报告", n.NodeID, n.UserInput)
 		}
 		if n.CreateTs == 0 {
 			t.Errorf("node %s missing create_ts", n.NodeID)
@@ -47,7 +50,7 @@ func TestBuildWorkflowNodes_CopiesDependsOn(t *testing.T) {
 	deps := []string{"n1"}
 	nodes := buildWorkflowNodes([]planningLLMNode{
 		{NodeID: "n2", Name: "步骤", DependsOn: deps},
-	}, "task-1")
+	}, "task-1", "")
 
 	nodes[0].DependsOn[0] = "mutated"
 	if deps[0] != "n1" {
@@ -59,9 +62,12 @@ func TestBuildWorkflowNodes_CopiesDependsOn(t *testing.T) {
 func TestBuildWorkflowNodes_CopiesContext(t *testing.T) {
 	nodes := buildWorkflowNodes([]planningLLMNode{
 		{NodeID: "n1", Name: "补充", Context: "用户本轮新增诉求"},
-	}, "task-1")
+	}, "task-1", "本轮用户输入")
 	if nodes[0].Context != "用户本轮新增诉求" {
 		t.Errorf("Context = %q，未从 planningLLMNode 传过来", nodes[0].Context)
+	}
+	if nodes[0].UserInput != "本轮用户输入" {
+		t.Errorf("UserInput = %q，未从规划任务传过来", nodes[0].UserInput)
 	}
 }
 
